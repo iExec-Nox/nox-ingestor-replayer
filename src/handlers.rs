@@ -41,7 +41,7 @@ pub async fn not_found(uri: Uri) -> impl IntoResponse {
 /// `GET /` — returns service name and current UTC timestamp.
 pub async fn root() -> Json<Value> {
     Json(json!({
-        "service": "Ingestor",
+        "service": "Ingestor Replayer",
         "timestamp": Utc::now().to_rfc3339()
     }))
 }

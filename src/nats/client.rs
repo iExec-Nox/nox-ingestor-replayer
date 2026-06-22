@@ -203,7 +203,7 @@ fn build_rustls_client_config(tls: &TlsConfig) -> Result<ClientConfig, NatsError
     for (label, value) in [("ca", &tls.ca), ("cert", &tls.cert), ("key", &tls.key)] {
         if value.trim().is_empty() {
             return Err(NatsError::Tls(format!(
-                "TLS enabled but `{label}` PEM content is empty (set NOX_INGESTOR_NATS__TLS__{} env var)",
+                "TLS enabled but `{label}` PEM content is empty (set NOX_REPLAYER_NATS__TLS__{} env var)",
                 label.to_uppercase()
             )));
         }

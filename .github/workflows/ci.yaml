@@ -52,7 +52,7 @@ jobs:
     needs: prepare
     uses: iExecBlockchainComputing/github-actions-workflows/.github/workflows/docker-build.yml@docker-build-v3.4.0
     with:
-      image-name: docker-regis.iex.ec/nox-ingestor
+      image-name: docker-regis.iex.ec/nox-ingestor-replayer
       image-tag: ${{ needs.prepare.outputs.image_tag }}
       dockerfile: Dockerfile
       context: .

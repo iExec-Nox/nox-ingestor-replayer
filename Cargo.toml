@@ -1,6 +1,6 @@
 [package]
-name = "nox-ingestor"
-version = "0.6.0"
+name = "nox-ingestor-replayer"
+version = "0.1.0"
 edition = "2024"
 license = "BUSL-1.1"
 

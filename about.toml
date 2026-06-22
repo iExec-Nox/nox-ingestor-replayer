@@ -10,7 +10,7 @@ accepted = [
     "Zlib"
 ]
 
-["nox-ingestor"]
+["nox-ingestor-replayer"]
 accepted = [
     "BUSL-1.1"
 ]
