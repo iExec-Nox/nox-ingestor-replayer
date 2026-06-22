@@ -93,11 +93,11 @@ impl Application {
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         // Initialize NATS metrics to zero so they appear in /metrics on startup
-        gauge!("nox_ingestor.nats.connection_state").set(0.0);
-        counter!("nox_ingestor.nats.reconnects_total").absolute(0);
-        gauge!("nox_ingestor.nats.buffer_len").set(0.0);
-        counter!("nox_ingestor.nats.publishes_total", "outcome" => "ok").absolute(0);
-        counter!("nox_ingestor.nats.publishes_total", "outcome" => "err").absolute(0);
+        gauge!("nox_replayer.nats.connection_state").set(0.0);
+        counter!("nox_replayer.nats.reconnects_total").absolute(0);
+        gauge!("nox_replayer.nats.buffer_len").set(0.0);
+        counter!("nox_replayer.nats.publishes_total", "outcome" => "ok").absolute(0);
+        counter!("nox_replayer.nats.publishes_total", "outcome" => "err").absolute(0);
 
         // 10. Main loop
         let mut flush_interval = interval(self.config.app.flush_interval);
@@ -143,9 +143,9 @@ impl Application {
                         info!(state = %state, "NATS state changed");
 
                         let connected = state == ConnectionState::Connected;
-                        gauge!("nox_ingestor.nats.connection_state").set(if connected { 1.0 } else { 0.0 });
+                        gauge!("nox_replayer.nats.connection_state").set(if connected { 1.0 } else { 0.0 });
                         if connected && !was_connected {
-                            counter!("nox_ingestor.nats.reconnects_total").increment(1);
+                            counter!("nox_replayer.nats.reconnects_total").increment(1);
                         }
                         was_connected = connected;
 
@@ -153,7 +153,7 @@ impl Application {
                             warn!(error = %e, "Error handling NATS state change");
                         }
 
-                        gauge!("nox_ingestor.nats.buffer_len").set(publisher.buffer_len() as f64);
+                        gauge!("nox_replayer.nats.buffer_len").set(publisher.buffer_len() as f64);
 
                         // After flush, if buffer is fully drained, advance persisted state
                         // to catch up with next_block (all messages now confirmed by NATS)
@@ -173,7 +173,7 @@ impl Application {
                     match publisher.try_resume_if_connected().await {
                         Ok(true) => {
                             info!("Buffer drained via periodic retry; chain reader resumed");
-                            gauge!("nox_ingestor.nats.buffer_len").set(publisher.buffer_len() as f64);
+                            gauge!("nox_replayer.nats.buffer_len").set(publisher.buffer_len() as f64);
                             if publisher.is_buffer_empty() && next_block > 0 {
                                 state_store.update(next_block - 1);
                             }
@@ -200,7 +200,7 @@ impl Application {
                             return;
                         }
                     };
-                    counter!("nox_ingestor.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "latest").absolute(latest);
+                    counter!("nox_replayer.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "latest").absolute(latest);
 
                     // Check if we need to wait for new blocks
                     if next_block > latest {
@@ -211,7 +211,7 @@ impl Application {
                     let batch = block_reader
                         .read_batch_with_retry(next_block, latest)
                         .await;
-                    counter!("nox_ingestor.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "parsed").absolute(batch.end_block);
+                    counter!("nox_replayer.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "parsed").absolute(batch.end_block);
 
                     // Publish transaction messages
                     // Each transaction becomes one NATS message
@@ -245,8 +245,8 @@ impl Application {
                             warn!(error = %e, "Failed to publish transaction");
                             sleep(self.config.nats.wait_interval).await;
                         }
-                        gauge!("nox_ingestor.nats.buffer_len").set(publisher.buffer_len() as f64);
-                        counter!("nox_ingestor.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "published").absolute(tx_block_number);
+                        gauge!("nox_replayer.nats.buffer_len").set(publisher.buffer_len() as f64);
+                        counter!("nox_replayer.chain.block_number", "chain_id" => self.config.chain.chain_id.to_string(), "type" => "published").absolute(tx_block_number);
                     }
                     // Always advance next_block to avoid re-reading in this session
                     if batch.end_block >= batch.start_block {

@@ -205,7 +205,7 @@ impl Publisher {
         let ack_future = match publish_future {
             Ok(fut) => fut,
             Err(e) => {
-                counter!("nox_ingestor.nats.publishes_total", "outcome" => "err").increment(1);
+                counter!("nox_replayer.nats.publishes_total", "outcome" => "err").increment(1);
                 return Err(NatsError::Publish(format!("Publish error: {}", e)));
             }
         };
@@ -213,12 +213,12 @@ impl Publisher {
         let ack = match ack_future.await {
             Ok(ack) => ack,
             Err(e) => {
-                counter!("nox_ingestor.nats.publishes_total", "outcome" => "err").increment(1);
+                counter!("nox_replayer.nats.publishes_total", "outcome" => "err").increment(1);
                 return Err(NatsError::Publish(format!("Ack error: {}", e)));
             }
         };
 
-        counter!("nox_ingestor.nats.publishes_total", "outcome" => "ok").increment(1);
+        counter!("nox_replayer.nats.publishes_total", "outcome" => "ok").increment(1);
 
         debug!(
             subject,

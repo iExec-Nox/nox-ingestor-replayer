@@ -9,16 +9,16 @@ use serde::Deserialize;
 /// TLS certificate configuration for mTLS client authentication.
 #[derive(Clone, Deserialize)]
 pub struct TlsConfig {
-    /// Whether mTLS is enabled (`NOX_INGESTOR_NATS__TLS__ENABLED`, default `true`).
+    /// Whether mTLS is enabled (`NOX_REPLAYER_NATS__TLS__ENABLED`, default `true`).
     /// Set to `false` for dev / Tenderly VM to connect to a plain NATS server.
     pub enabled: bool,
-    /// CA certificate PEM content (`NOX_INGESTOR_NATS__TLS__CA`). Required when `enabled`.
+    /// CA certificate PEM content (`NOX_REPLAYER_NATS__TLS__CA`). Required when `enabled`.
     #[serde(default)]
     pub ca: String,
-    /// Client certificate PEM content (`NOX_INGESTOR_NATS__TLS__CERT`). Required when `enabled`.
+    /// Client certificate PEM content (`NOX_REPLAYER_NATS__TLS__CERT`). Required when `enabled`.
     #[serde(default)]
     pub cert: String,
-    /// Client private key PEM content (`NOX_INGESTOR_NATS__TLS__KEY`). Required when `enabled`.
+    /// Client private key PEM content (`NOX_REPLAYER_NATS__TLS__KEY`). Required when `enabled`.
     #[serde(default)]
     pub key: String,
 }
@@ -72,7 +72,7 @@ pub struct ChainConfig {
 /// Application configuration
 #[derive(Debug, Deserialize)]
 pub struct AppConfig {
-    /// State file path (default: nox_ingestor_state_421614.json)
+    /// State file path (default: nox_replayer_state_421614.json)
     pub state_path: String,
 
     /// Flush interval (default: "5s")
@@ -83,13 +83,13 @@ pub struct AppConfig {
 /// NATS JetStream configuration
 #[derive(Debug, Clone, Deserialize)]
 pub struct NatsConfig {
-    /// NATS server URLs (`NOX_INGESTOR_NATS__URLS`, comma-separated)
+    /// NATS server URLs (`NOX_REPLAYER_NATS__URLS`, comma-separated)
     pub urls: Vec<String>,
 
     /// TLS client certificate configuration
     pub tls: TlsConfig,
 
-    /// JetStream stream replica count (`NOX_INGESTOR_NATS__NUM_REPLICAS`, default `3`)
+    /// JetStream stream replica count (`NOX_REPLAYER_NATS__NUM_REPLICAS`, default `3`)
     pub num_replicas: u32,
 
     /// JetStream stream name
@@ -147,7 +147,7 @@ impl Config {
             .set_default("chain.poll_delay", "500ms")?
             .set_default("chain.retry_delay", "250ms")?
             .set_default("app.flush_interval", "5s")?
-            .set_default("app.state_path", "nox_ingestor_state_421614.json")?
+            .set_default("app.state_path", "nox_replayer_state_421614.json")?
             .set_default(
                 "nats.urls",
                 vec![
@@ -170,14 +170,14 @@ impl Config {
             .set_default("nats.buffer_capacity", 1000)?
             .set_default("nats.wait_interval", "1s")?
             .add_source(
-                Environment::with_prefix("NOX_INGESTOR")
+                Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
                     .separator("__")
                     .list_separator(",")
                     .with_list_parse_key("nats.urls")
                     .try_parsing(true),
             )
-            .add_source(EnvironmentSecretFile::with_prefix("NOX_INGESTOR").separator("_"))
+            .add_source(EnvironmentSecretFile::with_prefix("NOX_REPLAYER").separator("_"))
             .build()?;
 
         config.try_deserialize()
@@ -191,7 +191,7 @@ impl Config {
     /// Get the state file path, using default if not specified
     pub fn state_file_path(&self) -> PathBuf {
         if self.app.state_path.is_empty() {
-            PathBuf::from(format!("./nox_ingestor_state_{}.json", self.chain.chain_id))
+            PathBuf::from(format!("./nox_replayer_state_{}.json", self.chain.chain_id))
         } else {
             PathBuf::from(&self.app.state_path)
         }
