@@ -32,7 +32,7 @@ impl Application {
     }
 
     pub async fn run(self) -> Result<()> {
-        debug!("Starting ingestor");
+        debug!("Starting ingestor replayer");
         debug!("Config: {:?}", self.config);
 
         // 1. Setup shutdown handler

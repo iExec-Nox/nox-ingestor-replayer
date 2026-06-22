@@ -16,7 +16,7 @@ RUN apk --no-cache upgrade
 WORKDIR /app
 
 # Copy the binary from builder stage
-COPY --from=builder /app/target/release/nox-ingestor .
+COPY --from=builder /app/target/release/nox-ingestor-replayer .
 
 # Run the application
-ENTRYPOINT ["/app/nox-ingestor"]
+ENTRYPOINT ["/app/nox-ingestor-replayer"]
