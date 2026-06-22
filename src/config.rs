@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
 use std::time::Duration;
 
 use alloy::primitives::Address;
@@ -36,48 +36,65 @@ impl std::fmt::Debug for TlsConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub app: AppConfig,
-    pub chain: ChainConfig,
+    pub chains: HashMap<u32, ChainConfig>,
     pub nats: NatsConfig,
+    pub replay: ReplayConfig,
     pub server: ServerConfig,
 }
 
-/// Chain/RPC configuration
-#[derive(Debug, Deserialize)]
-pub struct ChainConfig {
-    /// Chain ID (default: 421614 for Arbitrum Sepolia)
-    pub chain_id: u32,
+#[derive(Clone, Deserialize)]
+pub struct ReplayConfig {
+    /// Shared API key for X-Api-Key auth
+    pub api_key: String,
+    /// Max blocks a single /replay request may span (to - from + 1). Default 5000.
+    pub max_blocks_per_request: u64,
+    /// Max chains replaying concurrently across the process. Default 20.
+    pub max_concurrent_chains: usize,
+}
 
+impl std::fmt::Debug for ReplayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayConfig")
+            .field("api_key", &"<redacted>")
+            .field("max_blocks_per_request", &self.max_blocks_per_request)
+            .field("max_concurrent_chains", &self.max_concurrent_chains)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ChainConfig {
     /// RPC endpoint URL
     pub rpc_endpoint: String,
 
     /// Contract address to monitor
     pub contract_address: Address,
 
-    /// Initial block to start from (0 = require state file)
-    pub initial_block: u64,
-
-    /// Number of blocks to fetch per batch (default: 50)
+    /// Number of blocks to fetch per batch
     pub batch_size: u64,
 
-    /// Delay between polls (default: "500ms")
-    #[serde(with = "humantime_serde")]
-    pub poll_delay: Duration,
-
-    /// Delay between retries (default: "250ms")
+    /// Delay between retries
     #[serde(with = "humantime_serde")]
     pub retry_delay: Duration,
+
+    /// Bounded retry attempts for a failing batch read
+    pub max_retries: u32,
+
+    /// TCP connect timeout (handshake only). Default `10s`.
+    #[serde(with = "humantime_serde", default = "default_connect_timeout")]
+    pub connect_timeout: Duration,
+
+    /// Total per-request RPC timeout (connect + read). Default `30s`.
+    #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
+    pub rpc_timeout: Duration,
 }
 
-/// Application configuration
-#[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    /// State file path (default: nox_replayer_state_421614.json)
-    pub state_path: String,
+fn default_rpc_timeout() -> Duration {
+    Duration::from_secs(30)
+}
 
-    /// Flush interval (default: "5s")
-    #[serde(with = "humantime_serde")]
-    pub flush_interval: Duration,
+fn default_connect_timeout() -> Duration {
+    Duration::from_secs(10)
 }
 
 /// NATS JetStream configuration
@@ -113,13 +130,6 @@ pub struct NatsConfig {
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
     pub max_reconnect_delay: Duration,
-
-    /// Wait interval (default: 1s)
-    #[serde(with = "humantime_serde")]
-    pub wait_interval: Duration,
-
-    /// Message buffer capacity (default: 1000)
-    pub buffer_capacity: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -133,21 +143,6 @@ impl Config {
         let config = ConfigBuilder::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", "8080")?
-            .set_default("chain.chain_id", 421614)?
-            .set_default(
-                "chain.rpc_endpoint",
-                "https://arbitrum-sepolia-rpc.publicnode.com",
-            )?
-            .set_default(
-                "chain.contract_address",
-                "0x0000000000000000000000000000000000000000",
-            )?
-            .set_default("chain.initial_block", 0)?
-            .set_default("chain.batch_size", 50)?
-            .set_default("chain.poll_delay", "500ms")?
-            .set_default("chain.retry_delay", "250ms")?
-            .set_default("app.flush_interval", "5s")?
-            .set_default("app.state_path", "nox_replayer_state_421614.json")?
             .set_default(
                 "nats.urls",
                 vec![
@@ -167,8 +162,8 @@ impl Config {
             .set_default("nats.duplicate_window", "10m")?
             .set_default("nats.reconnect_delay", "1s")?
             .set_default("nats.max_reconnect_delay", "30s")?
-            .set_default("nats.buffer_capacity", 1000)?
-            .set_default("nats.wait_interval", "1s")?
+            .set_default("replay.max_blocks_per_request", 5000)?
+            .set_default("replay.max_concurrent_chains", 20)?
             .add_source(
                 Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
@@ -180,20 +175,12 @@ impl Config {
             .add_source(EnvironmentSecretFile::with_prefix("NOX_REPLAYER").separator("_"))
             .build()?;
 
-        config.try_deserialize()
+        let cfg: Config = config.try_deserialize()?;
+        Ok(cfg)
     }
 
     /// Returns the `host:port` string used to bind the HTTP listener.
     pub fn binding_address(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
-    }
-
-    /// Get the state file path, using default if not specified
-    pub fn state_file_path(&self) -> PathBuf {
-        if self.app.state_path.is_empty() {
-            PathBuf::from(format!("./nox_replayer_state_{}.json", self.chain.chain_id))
-        } else {
-            PathBuf::from(&self.app.state_path)
-        }
     }
 }

@@ -11,7 +11,6 @@ pub mod error;
 pub mod events;
 pub mod handlers;
 pub mod nats;
-pub mod state;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -32,7 +31,7 @@ async fn main() -> anyhow::Result<()> {
         e
     })?;
 
-    let app = Application::new(config)?;
+    let app = Application::new(config);
     app.run().await?;
 
     Ok(())
