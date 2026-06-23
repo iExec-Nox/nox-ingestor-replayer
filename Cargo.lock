@@ -2901,6 +2901,7 @@ dependencies = [
  "config",
  "config-secret",
  "humantime-serde",
+ "serde",
  "serde_json",
  "thiserror",
  "tokio",
