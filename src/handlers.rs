@@ -1,3 +1,5 @@
+//! Axum server handlers for health checks and metrics.
+
 use axum::{
     Json,
     extract::State,
