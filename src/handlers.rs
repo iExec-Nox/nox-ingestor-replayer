@@ -1,8 +1,10 @@
 use axum::{
     Json,
+    extract::State,
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
+use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
 
@@ -17,6 +19,11 @@ use serde_json::{Value, json};
 /// - `status`: The status of the service ("ok")
 pub async fn health_check() -> Json<Value> {
     Json(json!({ "status": "ok" }))
+}
+
+/// `GET /metrics` — renders Prometheus metrics as plain text.
+pub async fn metrics(State(metrics_handle): State<PrometheusHandle>) -> String {
+    metrics_handle.render()
 }
 
 /// Fallback handler for non-existing routes.

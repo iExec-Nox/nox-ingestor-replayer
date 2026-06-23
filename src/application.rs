@@ -1,8 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::{Router, routing::get};
-use axum_prometheus::{Handle, MakeDefaultHandle, PrometheusMetricLayerBuilder};
+use axum::{Router, extract::FromRef, routing::get};
+use axum_prometheus::{
+    Handle, MakeDefaultHandle, PrometheusMetricLayerBuilder,
+    metrics_exporter_prometheus::PrometheusHandle,
+};
 use tokio::signal;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -14,8 +17,15 @@ use crate::nats::{NatsClient, Publisher};
 
 #[derive(Clone)]
 pub struct AppState {
+    pub metrics_handle: PrometheusHandle,
     pub registry: Arc<ChainRegistry>,
     pub replay: ReplayConfig,
+}
+
+impl FromRef<AppState> for PrometheusHandle {
+    fn from_ref(state: &AppState) -> Self {
+        state.metrics_handle.clone()
+    }
 }
 
 pub struct Application {
@@ -61,28 +71,22 @@ impl Application {
             global: Arc::new(Semaphore::new(self.config.replay.max_concurrent_chains)),
         });
 
-        let app_state = AppState {
-            registry,
-            replay: self.config.replay.clone(),
-        };
-
         // 4. TCP server
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
             .with_allow_patterns(&["/", "/health", "/metrics", "/replay"])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
-        let metrics_handle_for_route = metrics_handle.clone();
+
+        let app_state = AppState {
+            metrics_handle,
+            registry,
+            replay: self.config.replay.clone(),
+        };
 
         let app = Router::new()
             .route("/", get(handlers::root))
             .route("/health", get(handlers::health_check))
-            .route(
-                "/metrics",
-                get(move || {
-                    let h = metrics_handle_for_route.clone();
-                    async move { h.render() }
-                }),
-            )
+            .route("/metrics", get(handlers::metrics))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);
