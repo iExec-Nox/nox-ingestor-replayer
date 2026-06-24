@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::time::Duration;
 
 use alloy::primitives::Address;
@@ -36,14 +35,13 @@ impl std::fmt::Debug for TlsConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub app: AppConfig,
     pub chain: ChainConfig,
     pub nats: NatsConfig,
     pub server: ServerConfig,
 }
 
 /// Chain/RPC configuration
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ChainConfig {
     /// Chain ID (default: 421614 for Arbitrum Sepolia)
     pub chain_id: u32,
@@ -54,30 +52,31 @@ pub struct ChainConfig {
     /// Contract address to monitor
     pub contract_address: Address,
 
-    /// Initial block to start from (0 = require state file)
-    pub initial_block: u64,
-
     /// Number of blocks to fetch per batch (default: 50)
     pub batch_size: u64,
-
-    /// Delay between polls (default: "500ms")
-    #[serde(with = "humantime_serde")]
-    pub poll_delay: Duration,
 
     /// Delay between retries (default: "250ms")
     #[serde(with = "humantime_serde")]
     pub retry_delay: Duration,
+
+    /// Bounded retry attempts for a failing batch read
+    pub max_retries: u32,
+
+    /// TCP connection timeout. Default `10s`.
+    #[serde(with = "humantime_serde", default = "default_connect_timeout")]
+    pub connect_timeout: Duration,
+
+    /// Total per-request RPC timeout (connect + read). Default `30s`.
+    #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
+    pub rpc_timeout: Duration,
 }
 
-/// Application configuration
-#[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    /// State file path (default: nox_replayer_state_421614.json)
-    pub state_path: String,
+fn default_connect_timeout() -> Duration {
+    Duration::from_secs(5)
+}
 
-    /// Flush interval (default: "5s")
-    #[serde(with = "humantime_serde")]
-    pub flush_interval: Duration,
+fn default_rpc_timeout() -> Duration {
+    Duration::from_secs(8)
 }
 
 /// NATS JetStream configuration
@@ -113,13 +112,6 @@ pub struct NatsConfig {
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
     pub max_reconnect_delay: Duration,
-
-    /// Wait interval (default: 1s)
-    #[serde(with = "humantime_serde")]
-    pub wait_interval: Duration,
-
-    /// Message buffer capacity (default: 1000)
-    pub buffer_capacity: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -142,12 +134,11 @@ impl Config {
                 "chain.contract_address",
                 "0x0000000000000000000000000000000000000000",
             )?
-            .set_default("chain.initial_block", 0)?
             .set_default("chain.batch_size", 50)?
-            .set_default("chain.poll_delay", "500ms")?
             .set_default("chain.retry_delay", "250ms")?
-            .set_default("app.flush_interval", "5s")?
-            .set_default("app.state_path", "nox_replayer_state_421614.json")?
+            .set_default("chain.max_retries", 5)?
+            .set_default("chain.connect_timeout", "10s")?
+            .set_default("chain.rpc_timeout", "30s")?
             .set_default(
                 "nats.urls",
                 vec![
@@ -167,8 +158,6 @@ impl Config {
             .set_default("nats.duplicate_window", "10m")?
             .set_default("nats.reconnect_delay", "1s")?
             .set_default("nats.max_reconnect_delay", "30s")?
-            .set_default("nats.buffer_capacity", 1000)?
-            .set_default("nats.wait_interval", "1s")?
             .add_source(
                 Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
@@ -180,20 +169,12 @@ impl Config {
             .add_source(EnvironmentSecretFile::with_prefix("NOX_REPLAYER").separator("_"))
             .build()?;
 
-        config.try_deserialize()
+        let cfg: Config = config.try_deserialize()?;
+        Ok(cfg)
     }
 
     /// Returns the `host:port` string used to bind the HTTP listener.
     pub fn binding_address(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
-    }
-
-    /// Get the state file path, using default if not specified
-    pub fn state_file_path(&self) -> PathBuf {
-        if self.app.state_path.is_empty() {
-            PathBuf::from(format!("./nox_replayer_state_{}.json", self.chain.chain_id))
-        } else {
-            PathBuf::from(&self.app.state_path)
-        }
     }
 }

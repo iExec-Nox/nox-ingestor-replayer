@@ -159,11 +159,6 @@ impl NatsClient {
         Arc::clone(&self.jetstream)
     }
 
-    /// Get a receiver for connection state changes
-    pub fn state_receiver(&self) -> watch::Receiver<ConnectionState> {
-        self.state_rx.clone()
-    }
-
     /// Get the current connection state
     pub fn state(&self) -> ConnectionState {
         *self.state_rx.borrow()
