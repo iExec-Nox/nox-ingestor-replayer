@@ -83,19 +83,27 @@ impl ReplayError {
                 | Self::Cancelled
         )
     }
+
+    fn chain_id(&self) -> Option<u32> {
+        match self {
+            Self::ChainNotConfigured { chain_id } | Self::ChainBusy { chain_id } => Some(*chain_id),
+            _ => None,
+        }
+    }
 }
 
 impl IntoResponse for ReplayError {
     fn into_response(self) -> Response {
         let status = self.status();
-        let body = Json(json!({
-            "error": {
-                "kind": self.kind(),
-                "message": self.to_string(),
-                "retryable": self.retryable(),
-            }
-        }));
-        (status, body).into_response()
+        let mut error_obj = json!({
+            "kind": self.kind(),
+            "message": self.to_string(),
+            "retryable": self.retryable(),
+        });
+        if let Some(chain_id) = self.chain_id() {
+            error_obj["chain_id"] = json!(chain_id);
+        }
+        (status, Json(json!({ "error": error_obj }))).into_response()
     }
 }
 
