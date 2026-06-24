@@ -40,7 +40,7 @@ pub struct BlockReader {
 }
 
 impl BlockReader {
-    /// Create a new block reader
+    /// Create a new `BlockReader` connected to `rpc_endpoint`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rpc_endpoint: &str,
@@ -71,7 +71,7 @@ impl BlockReader {
         })
     }
 
-    /// Read a batch with bounded retries
+    /// Read blocks `[from, to]` inclusive, retrying on transient RPC failures.
     pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, ChainError> {
         let mut attempt = 0u32;
         loop {
@@ -132,7 +132,7 @@ impl BlockReader {
         })
     }
 
-    /// Returns the configured batch size
+    /// Configured batch size in blocks.
     pub fn batch_size(&self) -> u64 {
         self.batch_size
     }

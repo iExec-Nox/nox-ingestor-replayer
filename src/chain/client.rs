@@ -54,7 +54,7 @@ impl ChainClient {
         })
     }
 
-    /// Fetch logs for a range of blocks
+    /// Fetch event logs for a block range filtered by contract address and event signatures.
     pub async fn get_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<Log>, ChainError> {
         let filter = Filter::new()
             .address(self.contract_address)

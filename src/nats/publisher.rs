@@ -12,10 +12,13 @@ use crate::events::TransactionMessage;
 use super::client::NatsClient;
 
 #[derive(Debug, Clone, Copy)]
+/// Outcome of a single NATS JetStream publish.
 pub struct PublishOutcome {
+    /// `true` if JetStream deduplicated this message (already seen by message ID).
     pub duplicate: bool,
 }
 
+/// Stateless NATS JetStream publisher. One instance per chain pipeline.
 pub struct Publisher {
     jetstream: Arc<JetStreamContext>,
     nats: Arc<NatsClient>,
@@ -23,6 +26,7 @@ pub struct Publisher {
 }
 
 impl Publisher {
+    /// Create a publisher attached to `nats`, writing to the stream configured in `config`.
     pub fn new(nats: Arc<NatsClient>, config: &NatsConfig) -> Self {
         Self {
             jetstream: nats.jetstream(),
@@ -31,10 +35,12 @@ impl Publisher {
         }
     }
 
+    /// Returns `true` if the underlying NATS connection is currently healthy.
     pub fn is_connected(&self) -> bool {
         self.nats.is_connected()
     }
 
+    /// Publish `message` to JetStream, returning whether it was a duplicate.
     pub async fn publish(&self, message: &TransactionMessage) -> Result<PublishOutcome, NatsError> {
         let subject = message.subject(&self.subject_prefix);
         let payload = message

@@ -1,3 +1,5 @@
+//! Application wiring: state assembly, route configuration, and server lifecycle.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -10,16 +12,26 @@ use tokio::signal;
 use tracing::{debug, info, warn};
 
 use crate::chain::{BlockReader, NoxEventParser};
-use crate::config::Config;
-use crate::events::{Operator, TransactionEvent};
+use crate::config::{Config, ReplayConfig};
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
+use tokio::sync::Semaphore;
 
+/// Shared state injected into every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
+    /// Prometheus metrics handle for the `/metrics` route.
     pub metrics_handle: PrometheusHandle,
+    /// Blockchain block reader for the configured chain.
     pub reader: Arc<BlockReader>,
+    /// NATS JetStream publisher.
     pub publisher: Arc<Publisher>,
+    /// Semaphore (1 permit) guarding against concurrent replays on the same chain.
+    pub lock: Arc<Semaphore>,
+    /// Chain ID this instance serves.
+    pub chain_id: u32,
+    /// Replay API configuration (API key, block limits).
+    pub replay: ReplayConfig,
 }
 
 impl FromRef<AppState> for PrometheusHandle {
@@ -28,15 +40,18 @@ impl FromRef<AppState> for PrometheusHandle {
     }
 }
 
+/// Owns configuration and drives the service startup sequence.
 pub struct Application {
     config: Config,
 }
 
 impl Application {
+    /// Create an `Application` from loaded configuration.
     pub fn new(config: Config) -> Result<Self> {
         Ok(Self { config })
     }
 
+    /// Initialise dependencies, wire routes, and serve until shutdown signal.
     pub async fn run(self) -> Result<()> {
         debug!("Starting ingestor replayer");
         debug!("Config: {:?}", self.config);
@@ -59,7 +74,7 @@ impl Application {
         let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics"])
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay"])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
@@ -67,12 +82,17 @@ impl Application {
             metrics_handle,
             reader: Arc::new(reader),
             publisher: Arc::new(publisher),
+            lock: Arc::new(Semaphore::new(1)),
+            chain_id: self.config.chain.chain_id,
+            replay: self.config.replay.clone(),
         };
 
         let app = Router::new()
             .route("/", get(handlers::root))
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
+            .route("/replay", axum::routing::post(handlers::replay))
+            .route("/replay/{chain_id}", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);
@@ -88,6 +108,7 @@ impl Application {
         Ok(())
     }
 
+    /// Resolves when `SIGTERM` or `Ctrl+C` is received.
     async fn shutdown_signal() {
         let ctrl_c = async {
             signal::ctrl_c()
@@ -116,215 +137,5 @@ impl Application {
         }
 
         warn!("Shutdown signal received, cleaning up...");
-    }
-}
-
-#[allow(dead_code)] // will be used in a later PR
-fn log_event(event: &TransactionEvent) {
-    match &event.operator {
-        Operator::Add(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Add"
-            );
-        }
-        Operator::Sub(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Sub"
-            );
-        }
-        Operator::Mul(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Mul"
-            );
-        }
-        Operator::Div(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Div"
-            );
-        }
-        Operator::SafeAdd(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                success = op.success,
-                result = op.result,
-                "SafeAdd"
-            );
-        }
-        Operator::SafeSub(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                success = op.success,
-                result = op.result,
-                "SafeSub"
-            );
-        }
-        Operator::SafeMul(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                success = op.success,
-                result = op.result,
-                "SafeMul"
-            );
-        }
-        Operator::SafeDiv(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                success = op.success,
-                result = op.result,
-                "SafeDiv"
-            );
-        }
-        Operator::Eq(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Eq"
-            );
-        }
-        Operator::Ne(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Ne"
-            );
-        }
-        Operator::Ge(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Ge"
-            );
-        }
-        Operator::Gt(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Gt"
-            );
-        }
-        Operator::Le(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Le"
-            );
-        }
-        Operator::Lt(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                leftHandOperand = op.left_hand_operand,
-                rightHandOperand = op.right_hand_operand,
-                result = op.result,
-                "Lt"
-            );
-        }
-        Operator::Select(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                condition = op.condition,
-                if_true = op.if_true,
-                if_false = op.if_false,
-                result = op.result,
-                "Select"
-            );
-        }
-        Operator::Transfer(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                balanceFrom = op.balance_from,
-                balanceTo = op.balance_to,
-                amount = op.amount,
-                success = op.success,
-                newBalanceFrom = op.new_balance_from,
-                newBalanceTo = op.new_balance_to,
-                "Transfer"
-            );
-        }
-        Operator::Mint(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                balanceTo = op.balance_to,
-                amount = op.amount,
-                totalSupply = op.total_supply,
-                success = op.success,
-                newBalanceTo = op.new_balance_to,
-                newTotalSupply = op.new_total_supply,
-                "Mint"
-            );
-        }
-        Operator::Burn(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                balanceFrom = op.balance_from,
-                amount = op.amount,
-                totalSupply = op.total_supply,
-                success = op.success,
-                newBalanceFrom = op.new_balance_from,
-                newTotalSupply = op.new_total_supply,
-                "Burn"
-            );
-        }
-        Operator::WrapAsPublicHandle(op) => {
-            info!(
-                log_index = event.log_index,
-                caller = format!("{:#x}", event.caller),
-                value = op.value,
-                tee_type = op.tee_type,
-                handle = op.handle,
-                "WrapAsPublicHandle"
-            )
-        }
     }
 }

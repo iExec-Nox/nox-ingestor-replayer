@@ -33,11 +33,13 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
+/// Root configuration, loaded from environment variables prefixed `NOX_REPLAYER_`.
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub chain: ChainConfig,
     pub nats: NatsConfig,
     pub server: ServerConfig,
+    pub replay: ReplayConfig,
 }
 
 /// Chain/RPC configuration
@@ -62,11 +64,11 @@ pub struct ChainConfig {
     /// Bounded retry attempts for a failing batch read
     pub max_retries: u32,
 
-    /// TCP connection timeout. Default `10s`.
+    /// TCP connection timeout. Default 10 s.
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
     pub connect_timeout: Duration,
 
-    /// Total per-request RPC timeout (connect + read). Default `30s`.
+    /// Total per-request RPC timeout (connect + read). Default 30 s.
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
     pub rpc_timeout: Duration,
 }
@@ -114,10 +116,29 @@ pub struct NatsConfig {
     pub max_reconnect_delay: Duration,
 }
 
+/// HTTP server bind configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+}
+
+/// Replay API configuration
+#[derive(Clone, Deserialize)]
+pub struct ReplayConfig {
+    pub api_key: String,
+    pub max_blocks_per_request: u64,
+    pub max_concurrent_chains: usize,
+}
+
+impl std::fmt::Debug for ReplayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayConfig")
+            .field("api_key", &"[REDACTED]")
+            .field("max_blocks_per_request", &self.max_blocks_per_request)
+            .field("max_concurrent_chains", &self.max_concurrent_chains)
+            .finish()
+    }
 }
 
 impl Config {
@@ -158,6 +179,8 @@ impl Config {
             .set_default("nats.duplicate_window", "10m")?
             .set_default("nats.reconnect_delay", "1s")?
             .set_default("nats.max_reconnect_delay", "30s")?
+            .set_default("replay.max_blocks_per_request", 5000)?
+            .set_default("replay.max_concurrent_chains", 20)?
             .add_source(
                 Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
