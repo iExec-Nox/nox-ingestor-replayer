@@ -5,6 +5,7 @@
 
 use alloy::primitives::{Address, keccak256};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// Handle type for encrypted values (hex-encoded bytes32)
 pub type Handle = String;
@@ -149,10 +150,9 @@ pub struct TransactionMessage {
 
 /// Logs a single transaction event via tracing.
 pub fn log_event(event: &TransactionEvent) {
-    use tracing::info;
     match &event.operator {
         Operator::Add(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -162,7 +162,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Sub(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -172,7 +172,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Mul(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -182,7 +182,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Div(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -192,7 +192,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::SafeAdd(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -203,7 +203,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::SafeSub(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -214,7 +214,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::SafeMul(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -225,7 +225,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::SafeDiv(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -236,7 +236,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Eq(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -246,7 +246,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Ne(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -256,7 +256,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Ge(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -266,7 +266,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Gt(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -276,7 +276,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Le(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -286,7 +286,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Lt(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 leftHandOperand = op.left_hand_operand,
@@ -296,7 +296,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Select(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 condition = op.condition,
@@ -307,7 +307,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Transfer(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 balanceFrom = op.balance_from,
@@ -320,7 +320,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Mint(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 balanceTo = op.balance_to,
@@ -333,7 +333,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::Burn(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 balanceFrom = op.balance_from,
@@ -346,7 +346,7 @@ pub fn log_event(event: &TransactionEvent) {
             );
         }
         Operator::WrapAsPublicHandle(op) => {
-            info!(
+            debug!(
                 log_index = event.log_index,
                 caller = format!("{:#x}", event.caller),
                 value = op.value,

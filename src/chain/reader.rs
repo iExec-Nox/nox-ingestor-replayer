@@ -8,7 +8,7 @@ use tokio::time::sleep;
 use tracing::warn;
 
 use crate::config::ChainConfig;
-use crate::error::ChainError;
+use crate::error::RpcError;
 use crate::events::{
     ArithmeticOperation, BooleanOperation, BurnOperation, EncryptionOperation, MintOperation,
     Operator, SafeArithmeticOperation, SelectOperation, TransactionEvent, TransactionMessage,
@@ -41,7 +41,7 @@ pub struct BlockReader {
 }
 
 impl BlockReader {
-    /// Create a new `BlockReader
+    /// Create a new block reader
     pub fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
         Self {
             client,
@@ -53,8 +53,8 @@ impl BlockReader {
         }
     }
 
-    /// Read blocks `[from, to]` inclusive, retrying on transient RPC failures.
-    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, ChainError> {
+    /// Read a batch with bounded retries
+    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, RpcError> {
         let mut attempt = 0u32;
         loop {
             match self.read_batch(from, to).await {
@@ -84,7 +84,7 @@ impl BlockReader {
     /// Returns transactions grouped from the batch.
     /// Events within each transaction are sorted by log_index.
     /// Transactions are sorted by (block_number, first_log_index).
-    async fn read_batch(&self, start_block: u64, to: u64) -> Result<BatchResult, ChainError> {
+    async fn read_batch(&self, start_block: u64, to: u64) -> Result<BatchResult, RpcError> {
         if start_block > to {
             return Ok(BatchResult {
                 transactions: Vec::new(),
@@ -114,13 +114,13 @@ impl BlockReader {
         })
     }
 
-    /// Configured batch size in blocks.
+    /// Returns the configured batch size
     pub fn batch_size(&self) -> u64 {
         self.batch_size
     }
 
     /// Latest block number on the configured chain.
-    pub async fn latest_block(&self) -> Result<u64, ChainError> {
+    pub async fn latest_block(&self) -> Result<u64, RpcError> {
         self.client.get_latest_block().await
     }
 

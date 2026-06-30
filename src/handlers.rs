@@ -15,7 +15,7 @@ use subtle::ConstantTimeEq;
 use tracing::warn;
 
 use crate::application::AppState;
-use crate::error::ReplayError;
+use crate::error::{NatsError, ReplayError};
 use crate::events::log_event;
 
 /// Health check endpoint handler.
@@ -31,7 +31,7 @@ pub async fn health_check() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
-/// `GET /metrics` — renders Prometheus metrics as plain text.
+/// `GET /metrics` renders Prometheus metrics as plain text.
 pub async fn metrics(State(metrics_handle): State<PrometheusHandle>) -> String {
     metrics_handle.render()
 }
@@ -51,12 +51,12 @@ pub async fn not_found(uri: Uri) -> impl IntoResponse {
     )
 }
 
-/// `GET /` — returns service name and current UTC timestamp.
+/// `GET /` returns service name and current UTC timestamp.
 pub async fn root() -> Json<Value> {
     Json(json!({ "service": "Ingestor Replayer", "timestamp": Utc::now().to_rfc3339() }))
 }
 
-/// `POST /replay` — replays a block range for a given chain.
+/// Request body for `POST /replay`: the inclusive block range to replay.
 #[derive(Debug, Deserialize)]
 pub struct ReplayRequest {
     pub from_block: u64,
@@ -111,6 +111,9 @@ fn check_within_head(to: u64, latest: u64) -> Result<(), ReplayError> {
 
 /// Verify the `X-Api-Key` header matches `expected` in constant time.
 fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), ReplayError> {
+    if expected.is_empty() {
+        return Err(ReplayError::Unauthorized);
+    }
     let provided = headers
         .get("X-Api-Key")
         .and_then(|v| v.to_str().ok())
@@ -141,64 +144,73 @@ pub async fn replay(
         state.replay.max_blocks_per_request,
     )?;
 
-    if !state.publisher.is_connected() {
-        return Err(ReplayError::NatsUnavailable);
-    }
-    let latest = state
-        .reader
-        .latest_block()
-        .await
-        .map_err(|e| ReplayError::Rpc(e.to_string()))?;
-    check_within_head(req.to_block, latest)?;
     let _permit = state
         .lock
         .clone()
         .try_acquire_owned()
         .map_err(|_| ReplayError::ChainBusy)?;
 
+    if !state.publisher.is_connected() {
+        return Err(ReplayError::Nats {
+            source: NatsError::Unavailable,
+        });
+    }
+    let latest = state
+        .reader
+        .latest_block()
+        .await
+        .map_err(|source| ReplayError::Rpc { source })?;
+    check_within_head(req.to_block, latest)?;
+
     let start = Instant::now();
     let mut transactions_published = 0u64;
     let mut events_total = 0u64;
     let mut duplicates = 0u64;
     let mut current = req.from_block;
+    let mut resume_from = req.from_block;
     let mut stopped_reason: Option<String> = None;
 
     'outer: while current <= req.to_block {
         let batch_to = current
-            .saturating_add(state.reader.batch_size() - 1)
+            .saturating_add(state.reader.batch_size().saturating_sub(1))
             .min(req.to_block);
 
         let batch = match state.reader.read_batch_bounded(current, batch_to).await {
             Ok(batch) => batch,
             Err(e) => {
                 warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
-                stopped_reason = Some(format!("rpc error: {e}"));
+                stopped_reason = Some("rpc error".to_string());
+                resume_from = current;
                 break;
             }
         };
 
         for tx in &batch.transactions {
-            let outcome = match state.publisher.publish_with_retry(tx).await {
-                Ok(outcome) => outcome,
+            match state.publisher.publish_with_retry(tx).await {
+                Ok(outcome) => {
+                    for event in &tx.events {
+                        log_event(event);
+                    }
+                    transactions_published += 1;
+                    events_total += tx.events.len() as u64;
+                    if outcome.duplicate {
+                        duplicates += 1;
+                    }
+                }
                 Err(e) => {
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
-                    stopped_reason = Some(format!("nats error: {e}"));
+                    stopped_reason = Some("nats error".to_string());
+                    // Resume from the failed block; already-acked blocks are not re-read.
+                    resume_from = tx.block_number;
                     break 'outer;
                 }
-            };
-            for event in &tx.events {
-                log_event(event);
-            }
-            transactions_published += 1;
-            events_total += tx.events.len() as u64;
-            if outcome.duplicate {
-                duplicates += 1;
             }
         }
-        current = batch_to + 1;
+
+        current = batch_to.saturating_add(1);
     }
 
-    let (completed, next_block) = replay_outcome(stopped_reason.is_none(), current);
+    let (completed, next_block) = replay_outcome(stopped_reason.is_none(), resume_from);
 
     Ok(Json(ReplayResponse {
         from_block: req.from_block,

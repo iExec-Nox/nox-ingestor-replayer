@@ -6,10 +6,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use thiserror::Error;
+use tracing::warn;
 
-/// Chain/RPC related errors
+/// RPC transport errors
 #[derive(Error, Debug)]
-pub enum ChainError {
+pub enum RpcError {
     #[error("Invalid RPC endpoint: {0}")]
     InvalidEndpoint(String),
 
@@ -30,14 +31,16 @@ pub enum ReplayError {
     RangeBeyondHead { to: u64, latest: u64 },
     #[error("chain is busy")]
     ChainBusy,
-    #[error("rpc error: {0}")]
-    Rpc(String),
-    #[error("nats error: {0}")]
-    Nats(String),
-    #[error("nats unavailable")]
-    NatsUnavailable,
-    #[error("replay cancelled")]
-    Cancelled,
+    #[error("rpc error")]
+    Rpc {
+        #[source]
+        source: RpcError,
+    },
+    #[error("nats error")]
+    Nats {
+        #[source]
+        source: NatsError,
+    },
 }
 
 impl ReplayError {
@@ -48,28 +51,22 @@ impl ReplayError {
                 StatusCode::BAD_REQUEST
             }
             Self::ChainBusy => StatusCode::CONFLICT,
-            Self::NatsUnavailable | Self::Nats(_) | Self::Cancelled => {
-                StatusCode::SERVICE_UNAVAILABLE
-            }
-            Self::Rpc(_) => StatusCode::BAD_GATEWAY,
+            Self::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            Self::Rpc { .. } => StatusCode::BAD_GATEWAY,
         }
     }
 
     fn retryable(&self) -> bool {
-        matches!(
-            self,
-            Self::ChainBusy
-                | Self::NatsUnavailable
-                | Self::Nats(_)
-                | Self::Rpc(_)
-                | Self::Cancelled
-        )
+        matches!(self, Self::ChainBusy | Self::Nats { .. } | Self::Rpc { .. })
     }
 }
 
 impl IntoResponse for ReplayError {
     fn into_response(self) -> Response {
         let status = self.status();
+        if status.is_server_error() {
+            warn!(error = %self, detail = ?std::error::Error::source(&self), "replay request failed");
+        }
         let error_obj = json!({
             "message": self.to_string(),
             "retryable": self.retryable(),
@@ -90,10 +87,13 @@ pub enum NatsError {
     #[error("Disconnected")]
     Disconnected,
 
+    #[error("NATS unavailable")]
+    Unavailable,
+
     #[error("Publish error: {0}")]
     Publish(String),
 
-    #[error("publish failed ({kind:?}): {message}")]
+    #[error("Publish failed ({kind:?}): {message}")]
     PublishFailed {
         kind: PublishErrorKind,
         message: String,
@@ -103,13 +103,10 @@ pub enum NatsError {
     StreamSetup(String),
 }
 
-/// Whether a JetStream publish error is worth retrying with the same `Nats-Msg-Id`
+/// Whether a JetStream publish error is worth retrying with the same `Nats-Msg-Id`.
 pub fn is_transient(kind: PublishErrorKind) -> bool {
     matches!(
         kind,
-        PublishErrorKind::TimedOut
-            | PublishErrorKind::BrokenPipe
-            | PublishErrorKind::StreamNotFound
-            | PublishErrorKind::MaxAckPending
+        PublishErrorKind::TimedOut | PublishErrorKind::BrokenPipe | PublishErrorKind::MaxAckPending
     )
 }

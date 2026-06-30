@@ -140,7 +140,7 @@ pub struct ReplayConfig {
 impl std::fmt::Debug for ReplayConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayConfig")
-            .field("api_key", &"[REDACTED]")
+            .field("api_key", &"<redacted>")
             .field("max_blocks_per_request", &self.max_blocks_per_request)
             .finish()
     }

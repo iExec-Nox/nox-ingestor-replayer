@@ -85,10 +85,12 @@ impl Publisher {
 
     /// Publish `message` with bounded retries on transient failures.
     ///
-    /// Retries reuse the same deterministic `Nats-Msg-Id`, so a retry within the
-    /// stream's `duplicate_window` is deduplicated (idempotent). Only transient
-    /// publish errors are retried; fatal publish errors and serialization errors
-    /// return immediately.
+    /// Makes up to `publish_max_retries + 1` total publish attempts (one initial
+    /// attempt plus `publish_max_retries` retries). Retries reuse the same
+    /// deterministic `Nats-Msg-Id`, so a retry within the stream's
+    /// `duplicate_window` is deduplicated (idempotent). Only transient publish
+    /// errors are retried; fatal publish errors and serialization errors return
+    /// immediately.
     pub async fn publish_with_retry(
         &self,
         message: &TransactionMessage,
