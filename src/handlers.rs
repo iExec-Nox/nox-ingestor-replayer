@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::State,
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Instant;
 use subtle::ConstantTimeEq;
+use tracing::warn;
 
 use crate::application::AppState;
 use crate::error::ReplayError;
@@ -43,7 +44,6 @@ pub async fn not_found(uri: Uri) -> impl IntoResponse {
         StatusCode::NOT_FOUND,
         Json(json!({
             "error": {
-                "kind": "not_found",
                 "message": format!("Route not found {}", uri.path()),
                 "retryable": false,
             }
@@ -59,7 +59,6 @@ pub async fn root() -> Json<Value> {
 /// `POST /replay` — replays a block range for a given chain.
 #[derive(Debug, Deserialize)]
 pub struct ReplayRequest {
-    pub chain_id: u32,
     pub from_block: u64,
     pub to_block: u64,
 }
@@ -67,13 +66,24 @@ pub struct ReplayRequest {
 /// Response from a successful replay.
 #[derive(Debug, Serialize)]
 pub struct ReplayResponse {
-    pub chain_id: u32,
     pub from_block: u64,
     pub to_block: u64,
     pub transactions_published: u64,
     pub events_total: u64,
     pub duplicates: u64,
     pub duration_ms: u64,
+    pub completed: bool,
+    pub next_block: Option<u64>,
+    pub stopped_reason: Option<String>,
+}
+
+/// Map a stop state to the `(completed, next_block)` pair for the response.
+fn replay_outcome(completed: bool, next_block_if_incomplete: u64) -> (bool, Option<u64>) {
+    if completed {
+        (true, None)
+    } else {
+        (false, Some(next_block_if_incomplete))
+    }
 }
 
 /// Validate that `[from, to]` is a non-empty range not exceeding `max` blocks.
@@ -91,6 +101,14 @@ fn validate_span(from: u64, to: u64, max: u64) -> Result<u64, ReplayError> {
     Ok(span)
 }
 
+/// Reject a `to_block` that lies beyond the current chain head.
+fn check_within_head(to: u64, latest: u64) -> Result<(), ReplayError> {
+    if to > latest {
+        return Err(ReplayError::RangeBeyondHead { to, latest });
+    }
+    Ok(())
+}
+
 /// Verify the `X-Api-Key` header matches `expected` in constant time.
 fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), ReplayError> {
     let provided = headers
@@ -106,6 +124,11 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
     }
 }
 
+/// `POST /replay` replays a block range, publishing each transaction to NATS.
+///
+/// Pre-flight failures return an error status. Mid-range failures stop without rollback
+/// and return `200` with `completed: false` and `next_block` to resume from. Retries and
+/// resumes reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
 pub async fn replay(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -118,45 +141,51 @@ pub async fn replay(
         state.replay.max_blocks_per_request,
     )?;
 
-    if req.chain_id != state.chain_id {
-        return Err(ReplayError::ChainNotConfigured {
-            chain_id: req.chain_id,
-        });
-    }
     if !state.publisher.is_connected() {
         return Err(ReplayError::NatsUnavailable);
     }
+    let latest = state
+        .reader
+        .latest_block()
+        .await
+        .map_err(|e| ReplayError::Rpc(e.to_string()))?;
+    check_within_head(req.to_block, latest)?;
     let _permit = state
         .lock
         .clone()
         .try_acquire_owned()
-        .map_err(|_| ReplayError::ChainBusy {
-            chain_id: req.chain_id,
-        })?;
+        .map_err(|_| ReplayError::ChainBusy)?;
 
     let start = Instant::now();
     let mut transactions_published = 0u64;
     let mut events_total = 0u64;
     let mut duplicates = 0u64;
     let mut current = req.from_block;
+    let mut stopped_reason: Option<String> = None;
 
-    while current <= req.to_block {
+    'outer: while current <= req.to_block {
         let batch_to = current
             .saturating_add(state.reader.batch_size() - 1)
             .min(req.to_block);
 
-        let batch = state
-            .reader
-            .read_batch_bounded(current, batch_to)
-            .await
-            .map_err(|e| ReplayError::Rpc(e.to_string()))?;
+        let batch = match state.reader.read_batch_bounded(current, batch_to).await {
+            Ok(batch) => batch,
+            Err(e) => {
+                warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
+                stopped_reason = Some(format!("rpc error: {e}"));
+                break;
+            }
+        };
 
         for tx in &batch.transactions {
-            let outcome = state
-                .publisher
-                .publish(tx)
-                .await
-                .map_err(|e| ReplayError::Nats(e.to_string()))?;
+            let outcome = match state.publisher.publish_with_retry(tx).await {
+                Ok(outcome) => outcome,
+                Err(e) => {
+                    warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
+                    stopped_reason = Some(format!("nats error: {e}"));
+                    break 'outer;
+                }
+            };
             for event in &tx.events {
                 log_event(event);
             }
@@ -169,25 +198,25 @@ pub async fn replay(
         current = batch_to + 1;
     }
 
+    let (completed, next_block) = replay_outcome(stopped_reason.is_none(), current);
+
     Ok(Json(ReplayResponse {
-        chain_id: req.chain_id,
         from_block: req.from_block,
         to_block: req.to_block,
         transactions_published,
         events_total,
         duplicates,
         duration_ms: start.elapsed().as_millis() as u64,
+        completed,
+        next_block,
+        stopped_reason,
     }))
 }
 
-/// `GET /replay/{chain_id}` — returns whether the chain is currently replaying.
+/// `GET /replay/status` returns whether a replay is currently running.
 pub async fn replay_status(
     State(state): State<AppState>,
-    Path(chain_id): Path<u32>,
 ) -> Result<Json<serde_json::Value>, ReplayError> {
-    if chain_id != state.chain_id {
-        return Err(ReplayError::ChainNotConfigured { chain_id });
-    }
     let busy = state.lock.available_permits() == 0;
-    Ok(Json(json!({ "chain_id": chain_id, "busy": busy })))
+    Ok(Json(json!({ "busy": busy })))
 }

@@ -1,5 +1,6 @@
 //! Error types for nox-ingestor-replayer
 
+use async_nats::jetstream::context::PublishErrorKind;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -21,17 +22,14 @@ pub enum ChainError {
 pub enum ReplayError {
     #[error("unauthorized")]
     Unauthorized,
-    #[error("chain {chain_id} not configured")]
-    ChainNotConfigured { chain_id: u32 },
     #[error("invalid block range: from must be <= to")]
     InvalidRange,
     #[error("range exceeds maximum of {max} blocks")]
     RangeTooLarge { max: u64 },
-    #[error("chain {chain_id} is busy")]
-    ChainBusy { chain_id: u32 },
-    #[allow(dead_code)]
-    #[error("at capacity (max {max} concurrent chains)")]
-    AtCapacity { max: usize },
+    #[error("to_block {to} exceeds chain head {latest}")]
+    RangeBeyondHead { to: u64, latest: u64 },
+    #[error("chain is busy")]
+    ChainBusy,
     #[error("rpc error: {0}")]
     Rpc(String),
     #[error("nats error: {0}")]
@@ -46,63 +44,36 @@ impl ReplayError {
     fn status(&self) -> StatusCode {
         match self {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
-            Self::ChainNotConfigured { .. } | Self::InvalidRange | Self::RangeTooLarge { .. } => {
+            Self::InvalidRange | Self::RangeTooLarge { .. } | Self::RangeBeyondHead { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            Self::ChainBusy { .. } => StatusCode::CONFLICT,
-            Self::AtCapacity { .. } | Self::NatsUnavailable | Self::Nats(_) | Self::Cancelled => {
+            Self::ChainBusy => StatusCode::CONFLICT,
+            Self::NatsUnavailable | Self::Nats(_) | Self::Cancelled => {
                 StatusCode::SERVICE_UNAVAILABLE
             }
             Self::Rpc(_) => StatusCode::BAD_GATEWAY,
         }
     }
 
-    fn kind(&self) -> &str {
-        match self {
-            Self::Unauthorized => "unauthorized",
-            Self::ChainNotConfigured { .. } => "chain_not_configured",
-            Self::InvalidRange => "invalid_range",
-            Self::RangeTooLarge { .. } => "range_too_large",
-            Self::ChainBusy { .. } => "chain_busy",
-            Self::AtCapacity { .. } => "at_capacity",
-            Self::Rpc(_) => "rpc_error",
-            Self::Nats(_) => "nats_error",
-            Self::NatsUnavailable => "nats_unavailable",
-            Self::Cancelled => "cancelled",
-        }
-    }
-
     fn retryable(&self) -> bool {
         matches!(
             self,
-            Self::ChainBusy { .. }
-                | Self::AtCapacity { .. }
+            Self::ChainBusy
                 | Self::NatsUnavailable
                 | Self::Nats(_)
                 | Self::Rpc(_)
                 | Self::Cancelled
         )
     }
-
-    fn chain_id(&self) -> Option<u32> {
-        match self {
-            Self::ChainNotConfigured { chain_id } | Self::ChainBusy { chain_id } => Some(*chain_id),
-            _ => None,
-        }
-    }
 }
 
 impl IntoResponse for ReplayError {
     fn into_response(self) -> Response {
         let status = self.status();
-        let mut error_obj = json!({
-            "kind": self.kind(),
+        let error_obj = json!({
             "message": self.to_string(),
             "retryable": self.retryable(),
         });
-        if let Some(chain_id) = self.chain_id() {
-            error_obj["chain_id"] = json!(chain_id);
-        }
         (status, Json(json!({ "error": error_obj }))).into_response()
     }
 }
@@ -122,6 +93,23 @@ pub enum NatsError {
     #[error("Publish error: {0}")]
     Publish(String),
 
+    #[error("publish failed ({kind:?}): {message}")]
+    PublishFailed {
+        kind: PublishErrorKind,
+        message: String,
+    },
+
     #[error("Stream setup error: {0}")]
     StreamSetup(String),
+}
+
+/// Whether a JetStream publish error is worth retrying with the same `Nats-Msg-Id`
+pub fn is_transient(kind: PublishErrorKind) -> bool {
+    matches!(
+        kind,
+        PublishErrorKind::TimedOut
+            | PublishErrorKind::BrokenPipe
+            | PublishErrorKind::StreamNotFound
+            | PublishErrorKind::MaxAckPending
+    )
 }

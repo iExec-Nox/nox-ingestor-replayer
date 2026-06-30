@@ -11,7 +11,7 @@ use axum_prometheus::{
 use tokio::signal;
 use tracing::{debug, info, warn};
 
-use crate::chain::{BlockReader, NoxEventParser};
+use crate::chain::{BlockReader, ChainClient, NoxEventParser};
 use crate::config::{Config, ReplayConfig};
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
@@ -28,8 +28,6 @@ pub struct AppState {
     pub publisher: Arc<Publisher>,
     /// Semaphore (1 permit) guarding against concurrent replays on the same chain.
     pub lock: Arc<Semaphore>,
-    /// Chain ID this instance serves.
-    pub chain_id: u32,
     /// Replay API configuration (API key, block limits).
     pub replay: ReplayConfig,
 }
@@ -60,16 +58,14 @@ impl Application {
         nats_client.setup_stream(&self.config.nats).await?;
 
         let parser = NoxEventParser::new(self.config.chain.contract_address);
-        let reader = BlockReader::new(
+        let client = ChainClient::new(
             &self.config.chain.rpc_endpoint,
-            parser,
-            self.config.chain.batch_size,
-            self.config.chain.retry_delay,
-            self.config.chain.max_retries,
+            parser.contract_address(),
+            parser.event_signatures(),
             self.config.chain.connect_timeout,
             self.config.chain.rpc_timeout,
-            self.config.chain.chain_id,
         )?;
+        let reader = BlockReader::new(client, parser, &self.config.chain);
 
         let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
 
@@ -83,7 +79,6 @@ impl Application {
             reader: Arc::new(reader),
             publisher: Arc::new(publisher),
             lock: Arc::new(Semaphore::new(1)),
-            chain_id: self.config.chain.chain_id,
             replay: self.config.replay.clone(),
         };
 
@@ -92,7 +87,7 @@ impl Application {
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
             .route("/replay", axum::routing::post(handlers::replay))
-            .route("/replay/{chain_id}", get(handlers::replay_status))
+            .route("/replay/status", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);

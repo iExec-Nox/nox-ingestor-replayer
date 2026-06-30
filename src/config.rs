@@ -54,7 +54,7 @@ pub struct ChainConfig {
     /// Contract address to monitor
     pub contract_address: Address,
 
-    /// Number of blocks to fetch per batch (default: 50)
+    /// Number of blocks fetched per `eth_getLogs` call when chunking a replay range (default: 50)
     pub batch_size: u64,
 
     /// Delay between retries (default: "250ms")
@@ -114,6 +114,13 @@ pub struct NatsConfig {
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
     pub max_reconnect_delay: Duration,
+
+    /// Delay between bounded publish retries on a transient NATS failure (default: 250ms).
+    #[serde(with = "humantime_serde")]
+    pub publish_retry_delay: Duration,
+
+    /// Bounded retry attempts for a transient publish failure (default: 5).
+    pub publish_max_retries: u32,
 }
 
 /// HTTP server bind configuration.
@@ -128,7 +135,6 @@ pub struct ServerConfig {
 pub struct ReplayConfig {
     pub api_key: String,
     pub max_blocks_per_request: u64,
-    pub max_concurrent_chains: usize,
 }
 
 impl std::fmt::Debug for ReplayConfig {
@@ -136,7 +142,6 @@ impl std::fmt::Debug for ReplayConfig {
         f.debug_struct("ReplayConfig")
             .field("api_key", &"[REDACTED]")
             .field("max_blocks_per_request", &self.max_blocks_per_request)
-            .field("max_concurrent_chains", &self.max_concurrent_chains)
             .finish()
     }
 }
@@ -179,8 +184,9 @@ impl Config {
             .set_default("nats.duplicate_window", "10m")?
             .set_default("nats.reconnect_delay", "1s")?
             .set_default("nats.max_reconnect_delay", "30s")?
+            .set_default("nats.publish_retry_delay", "250ms")?
+            .set_default("nats.publish_max_retries", 5)?
             .set_default("replay.max_blocks_per_request", 5000)?
-            .set_default("replay.max_concurrent_chains", 20)?
             .add_source(
                 Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
