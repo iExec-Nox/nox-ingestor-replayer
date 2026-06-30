@@ -244,7 +244,7 @@ fn build_rustls_client_config(tls: &TlsConfig) -> Result<ClientConfig, NatsError
 mod tests {
     use super::normalize_pem;
 
-    // Fake base64 bodies content is irrelevant; only the structural normalization matters.
+    // Fake base64 bodies — content is irrelevant; only the structural normalization matters.
     const BODY_A: &str = "MIIFajCCBFKgAwIBAgISA1aaaaaaaaaaaaaaaaaaaaaa";
     const BODY_B: &str = "MIIFbjCCBFKgAwIBAgISB2bbbbbbbbbbbbbbbbbbbbbb";
 
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn multi_word_label_spaces_are_preserved() {
-        // S1: spaces *inside* a label (e.g. "EC PRIVATE KEY") must survive they are
+        // S1: spaces *inside* a label (e.g. "EC PRIVATE KEY") must survive — they are
         // flanked by letters, never adjacent to a `-----` boundary.
         let collapsed =
             format!("-----BEGIN EC PRIVATE KEY----- {BODY_A} -----END EC PRIVATE KEY-----");
@@ -325,7 +325,7 @@ mod tests {
     fn w1_mixed_separator_chain_is_fully_normalized() {
         // CA bundle where block 1 uses literal `\n` and block 2 is space-collapsed.
         // After `\n` resolution block 1 yields a `-----\n`, tripping the early return
-        // and leaving block 2's spaces intact block 2 then fails to parse.
+        // and leaving block 2's spaces intact — block 2 then fails to parse.
         let mixed = format!(
             "-----BEGIN CERTIFICATE-----\\n{BODY_A}\\n-----END CERTIFICATE----- \
              -----BEGIN CERTIFICATE----- {BODY_B} -----END CERTIFICATE-----"
