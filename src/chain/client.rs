@@ -4,8 +4,10 @@ use alloy::{
     primitives::{Address, B256},
     providers::{Provider, ProviderBuilder},
     rpc::types::{BlockNumberOrTag, Filter, Log},
+    transports::http::reqwest,
 };
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::info;
 
 use crate::error::ChainError;
@@ -23,15 +25,25 @@ impl ChainClient {
         rpc_endpoint: &str,
         contract_address: Address,
         event_signatures: Vec<B256>,
+        connect_timeout: Duration,
+        rpc_timeout: Duration,
     ) -> Result<Self, ChainError> {
         let primary_url = rpc_endpoint
             .parse()
             .map_err(|e| ChainError::InvalidEndpoint(format!("{}: {}", rpc_endpoint, e)))?;
 
-        let primary_provider = ProviderBuilder::new().connect_http(primary_url);
+        let http_client = reqwest::Client::builder()
+            .connect_timeout(connect_timeout)
+            .timeout(rpc_timeout)
+            .build()
+            .map_err(|e| ChainError::InvalidEndpoint(format!("http client build: {e}")))?;
+
+        let primary_provider = ProviderBuilder::new().connect_reqwest(http_client, primary_url);
 
         info!(
             primary = %rpc_endpoint,
+            connect_timeout_ms = connect_timeout.as_millis(),
+            rpc_timeout_ms = rpc_timeout.as_millis(),
             "ChainClient initialized"
         );
 
@@ -40,14 +52,6 @@ impl ChainClient {
             contract_address,
             event_signatures,
         })
-    }
-
-    /// Get the latest block number
-    pub async fn get_latest_block(&self) -> Result<u64, ChainError> {
-        self.primary_provider
-            .get_block_number()
-            .await
-            .map_err(Into::into)
     }
 
     /// Fetch logs for a range of blocks
@@ -61,6 +65,6 @@ impl ChainClient {
         self.primary_provider
             .get_logs(&filter)
             .await
-            .map_err(Into::into)
+            .map_err(|e| ChainError::Provider(e.to_string()))
     }
 }

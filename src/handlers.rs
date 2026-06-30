@@ -34,14 +34,17 @@ pub async fn metrics(State(metrics_handle): State<PrometheusHandle>) -> String {
 pub async fn not_found(uri: Uri) -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
-        Json(json!({ "error":format!("Route not found {}", uri.path()) })),
+        Json(json!({
+            "error": {
+                "kind": "not_found",
+                "message": format!("Route not found {}", uri.path()),
+                "retryable": false,
+            }
+        })),
     )
 }
 
 /// `GET /` — returns service name and current UTC timestamp.
 pub async fn root() -> Json<Value> {
-    Json(json!({
-        "service": "Ingestor Replayer",
-        "timestamp": Utc::now().to_rfc3339()
-    }))
+    Json(json!({ "service": "Ingestor Replayer", "timestamp": Utc::now().to_rfc3339() }))
 }

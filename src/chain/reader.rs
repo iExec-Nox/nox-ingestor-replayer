@@ -4,9 +4,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use alloy::{primitives::FixedBytes, rpc::types::Log};
-use tokio::sync::watch;
 use tokio::time::sleep;
-use tracing::{debug, error, warn};
+use tracing::warn;
 
 use crate::error::ChainError;
 use crate::events::{
@@ -35,83 +34,62 @@ pub struct BlockReader {
     client: ChainClient,
     parser: NoxEventParser,
     batch_size: u64,
-    poll_delay: Duration,
     retry_delay: Duration,
+    max_retries: u32,
     chain_id: u32,
-    pause_rx: watch::Receiver<bool>,
 }
 
 impl BlockReader {
     /// Create a new block reader
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         rpc_endpoint: &str,
         parser: NoxEventParser,
         batch_size: u64,
-        poll_delay: Duration,
         retry_delay: Duration,
+        max_retries: u32,
+        connect_timeout: Duration,
+        rpc_timeout: Duration,
         chain_id: u32,
-        pause_rx: watch::Receiver<bool>,
     ) -> Result<Self, ChainError> {
+        assert!(batch_size > 0, "batch_size must be > 0");
         let client = ChainClient::new(
             rpc_endpoint,
             parser.contract_address(),
             parser.event_signatures(),
+            connect_timeout,
+            rpc_timeout,
         )?;
 
         Ok(Self {
             client,
             parser,
             batch_size,
-            poll_delay,
             retry_delay,
+            max_retries,
             chain_id,
-            pause_rx,
         })
     }
 
-    /// Wait until unpaused (NATS connected)
-    pub async fn wait_until_unpaused(&mut self) {
-        while *self.pause_rx.borrow() {
-            debug!("Reader paused, waiting for NATS connection...");
-            if self.pause_rx.changed().await.is_err() {
-                // Channel closed, return
-                break;
-            }
-        }
-    }
-
-    /// Get the latest block number with retry
-    pub async fn get_latest_block(&self) -> Result<u64, ChainError> {
+    /// Read a batch with bounded retries
+    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, ChainError> {
+        let mut attempt = 0u32;
         loop {
-            match self.client.get_latest_block().await {
-                Ok(block) => return Ok(block),
+            match self.read_batch(from, to).await {
+                Ok(result) => return Ok(result),
                 Err(e) => {
-                    error!(error = %e, retry_delay_ms = %self.retry_delay.as_millis(), "Failed to get latest block");
-                    sleep(self.retry_delay).await;
-                }
-            }
-        }
-    }
-
-    /// Read a batch with retry on failure
-    pub async fn read_batch_with_retry(&self, start_block: u64, latest_block: u64) -> BatchResult {
-        loop {
-            match self.read_batch(start_block, latest_block).await {
-                Ok(result) => {
-                    debug!(
-                        start_block,
-                        end_block = result.end_block,
-                        tx_count = result.transactions.len(),
-                        "Batch read successfully"
-                    );
-                    return result;
-                }
-                Err(e) => {
+                    attempt += 1;
+                    if attempt > self.max_retries {
+                        return Err(e);
+                    }
                     warn!(
                         error = %e,
-                        start_block,
-                        retry_delay_ms = %self.retry_delay.as_millis(),
-                        "Failed to read batch, retrying"
+                        from,
+                        to,
+                        attempt,
+                        max_retries = self.max_retries,
+                        retry_delay_ms = self.retry_delay.as_millis(),
+                        "batch read failed, retrying"
                     );
                     sleep(self.retry_delay).await;
                 }
@@ -124,13 +102,8 @@ impl BlockReader {
     /// Returns transactions grouped from the batch.
     /// Events within each transaction are sorted by log_index.
     /// Transactions are sorted by (block_number, first_log_index).
-    async fn read_batch(
-        &self,
-        start_block: u64,
-        latest_block: u64,
-    ) -> Result<BatchResult, ChainError> {
-        if start_block > latest_block {
-            // No blocks available yet
+    async fn read_batch(&self, start_block: u64, to: u64) -> Result<BatchResult, ChainError> {
+        if start_block > to {
             return Ok(BatchResult {
                 transactions: Vec::new(),
                 start_block,
@@ -138,13 +111,8 @@ impl BlockReader {
             });
         }
 
-        // Calculate end block (clamped to latest and batch_size)
-        let end_block = (start_block + self.batch_size - 1).min(latest_block);
+        let logs = self.client.get_logs(start_block, to).await?;
 
-        // Fetch logs for the entire range
-        let logs = self.client.get_logs(start_block, end_block).await?;
-
-        // Parse all logs and convert to TransactionEvent with metadata
         let mut events: Vec<(u64, u64, String, TransactionEvent)> = logs
             .iter()
             .filter_map(|log| {
@@ -153,30 +121,23 @@ impl BlockReader {
             })
             .collect();
 
-        // Sort by (block_number, log_index) for guaranteed order
         events.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
 
-        // Group events by transaction
         let transactions = self.group_by_transaction(events);
 
         Ok(BatchResult {
             transactions,
             start_block,
-            end_block,
+            end_block: to,
         })
     }
 
-    /// Get the poll delay
-    pub fn poll_delay(&self) -> Duration {
-        self.poll_delay
+    /// Returns the configured batch size
+    pub fn batch_size(&self) -> u64 {
+        self.batch_size
     }
 
     /// Group events by transaction hash
-    ///
-    /// Returns transactions sorted by (block_number, first_log_index).
-    /// Events within each transaction are sorted by log_index.
-    ///
-    /// Input: Vec of (block_number, log_index, tx_hash, event)
     fn group_by_transaction(
         &self,
         events: Vec<(u64, u64, String, TransactionEvent)>,
@@ -223,7 +184,6 @@ fn to_handle(bytes: FixedBytes<32>) -> String {
 }
 
 /// Convert a parsed `NoxEvent` with its source `Log` metadata into a `TransactionEvent`.
-/// Returns (block_number, log_index, tx_hash, event) or None if metadata is missing.
 fn to_transaction_event(
     event: &NoxEvent,
     log: &Log,
