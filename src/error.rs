@@ -8,7 +8,7 @@ use serde_json::json;
 use thiserror::Error;
 use tracing::warn;
 
-/// RPC transport errors
+/// RPC related errors
 #[derive(Error, Debug)]
 pub enum RpcError {
     #[error("Invalid RPC endpoint: {0}")]
@@ -103,10 +103,14 @@ pub enum NatsError {
     StreamSetup(String),
 }
 
-/// Whether a JetStream publish error is worth retrying with the same `Nats-Msg-Id`.
-pub fn is_transient(kind: PublishErrorKind) -> bool {
-    matches!(
-        kind,
-        PublishErrorKind::TimedOut | PublishErrorKind::BrokenPipe | PublishErrorKind::MaxAckPending
-    )
+impl NatsError {
+    /// Whether a JetStream publish error is worth retrying with the same `Nats-Msg-Id`.
+    pub fn is_transient(kind: PublishErrorKind) -> bool {
+        matches!(
+            kind,
+            PublishErrorKind::TimedOut
+                | PublishErrorKind::BrokenPipe
+                | PublishErrorKind::MaxAckPending
+        )
+    }
 }

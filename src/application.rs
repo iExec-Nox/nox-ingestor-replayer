@@ -1,5 +1,3 @@
-//! Application wiring: state assembly, route configuration, and server lifecycle.
-
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -20,15 +18,10 @@ use tokio::sync::Semaphore;
 /// Shared state injected into every Axum handler.
 #[derive(Clone)]
 pub struct AppState {
-    /// Prometheus metrics handle for the `/metrics` route.
     pub metrics_handle: PrometheusHandle,
-    /// Blockchain block reader for the configured chain.
     pub reader: Arc<BlockReader>,
-    /// NATS JetStream publisher.
     pub publisher: Arc<Publisher>,
-    /// Semaphore (1 permit) guarding against concurrent replays on the same chain.
     pub lock: Arc<Semaphore>,
-    /// Replay API configuration (API key, block limits).
     pub replay: ReplayConfig,
 }
 
@@ -38,18 +31,15 @@ impl FromRef<AppState> for PrometheusHandle {
     }
 }
 
-/// Owns configuration and drives the service startup sequence.
 pub struct Application {
     config: Config,
 }
 
 impl Application {
-    /// Create an `Application` from loaded configuration.
     pub fn new(config: Config) -> Result<Self> {
         Ok(Self { config })
     }
 
-    /// Initialise dependencies, wire routes, and serve until shutdown signal.
     pub async fn run(self) -> Result<()> {
         debug!("Starting ingestor replayer");
         debug!("Config: {:?}", self.config);
@@ -103,7 +93,6 @@ impl Application {
         Ok(())
     }
 
-    /// Resolves when `SIGTERM` or `Ctrl+C` is received.
     async fn shutdown_signal() {
         let ctrl_c = async {
             signal::ctrl_c()

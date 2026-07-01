@@ -33,7 +33,6 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
-/// Root configuration, loaded from environment variables prefixed `NOX_REPLAYER_`.
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub chain: ChainConfig,
@@ -54,7 +53,7 @@ pub struct ChainConfig {
     /// Contract address to monitor
     pub contract_address: Address,
 
-    /// Number of blocks fetched per `eth_getLogs` call when chunking a replay range (default: 50)
+    /// Number of blocks to fetch per batch (default: 50)
     pub batch_size: u64,
 
     /// Delay between retries (default: "250ms")
@@ -64,11 +63,11 @@ pub struct ChainConfig {
     /// Bounded retry attempts for a failing batch read
     pub max_retries: u32,
 
-    /// TCP connection timeout. Default 10 s.
+    /// TCP connection timeout (default: `8s`)
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
     pub connect_timeout: Duration,
 
-    /// Total per-request RPC timeout (connect + read). Default 30 s.
+    /// Total per-request RPC timeout (default: `8s`)
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
     pub rpc_timeout: Duration,
 }
@@ -123,14 +122,12 @@ pub struct NatsConfig {
     pub publish_max_retries: u32,
 }
 
-/// HTTP server bind configuration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
 }
 
-/// Replay API configuration
 #[derive(Clone, Deserialize)]
 pub struct ReplayConfig {
     pub api_key: String,

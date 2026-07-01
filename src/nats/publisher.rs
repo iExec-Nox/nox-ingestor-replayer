@@ -8,19 +8,16 @@ use tokio::time::sleep;
 use tracing::{debug, warn};
 
 use crate::config::NatsConfig;
-use crate::error::{NatsError, is_transient};
+use crate::error::NatsError;
 use crate::events::TransactionMessage;
 
 use super::client::NatsClient;
 
 #[derive(Debug, Clone, Copy)]
-/// Outcome of a single NATS JetStream publish.
 pub struct PublishOutcome {
-    /// `true` if JetStream deduplicated this message (already seen by message ID).
     pub duplicate: bool,
 }
 
-/// Stateless NATS JetStream publisher. One instance per chain pipeline.
 pub struct Publisher {
     jetstream: Arc<JetStreamContext>,
     nats: Arc<NatsClient>,
@@ -30,7 +27,6 @@ pub struct Publisher {
 }
 
 impl Publisher {
-    /// Create a publisher attached to `nats`, writing to the stream configured in `config`.
     pub fn new(nats: Arc<NatsClient>, config: &NatsConfig) -> Self {
         Self {
             jetstream: nats.jetstream(),
@@ -41,12 +37,10 @@ impl Publisher {
         }
     }
 
-    /// Returns `true` if the underlying NATS connection is currently healthy.
     pub fn is_connected(&self) -> bool {
         self.nats.is_connected()
     }
 
-    /// Publish `message` to JetStream, returning whether it was a duplicate.
     pub async fn publish(&self, message: &TransactionMessage) -> Result<PublishOutcome, NatsError> {
         let subject = message.subject(&self.subject_prefix);
         let payload = message
@@ -84,13 +78,6 @@ impl Publisher {
     }
 
     /// Publish `message` with bounded retries on transient failures.
-    ///
-    /// Makes up to `publish_max_retries + 1` total publish attempts (one initial
-    /// attempt plus `publish_max_retries` retries). Retries reuse the same
-    /// deterministic `Nats-Msg-Id`, so a retry within the stream's
-    /// `duplicate_window` is deduplicated (idempotent). Only transient publish
-    /// errors are retried; fatal publish errors and serialization errors return
-    /// immediately.
     pub async fn publish_with_retry(
         &self,
         message: &TransactionMessage,
@@ -100,7 +87,7 @@ impl Publisher {
             match self.publish(message).await {
                 Ok(outcome) => return Ok(outcome),
                 Err(NatsError::PublishFailed { kind, message: msg })
-                    if is_transient(kind) && attempt < self.publish_max_retries =>
+                    if NatsError::is_transient(kind) && attempt < self.publish_max_retries =>
                 {
                     attempt += 1;
                     warn!(
