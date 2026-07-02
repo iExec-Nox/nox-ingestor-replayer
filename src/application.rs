@@ -13,7 +13,7 @@ use crate::chain::{BlockReader, ChainClient, NoxEventParser};
 use crate::config::{Config, ReplayConfig};
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, watch};
 
 /// Shared state injected into every Axum handler.
 #[derive(Clone)]
@@ -23,6 +23,7 @@ pub struct AppState {
     pub publisher: Arc<Publisher>,
     pub lock: Arc<Semaphore>,
     pub replay: ReplayConfig,
+    pub shutdown: watch::Receiver<bool>,
 }
 
 impl FromRef<AppState> for PrometheusHandle {
@@ -64,12 +65,15 @@ impl Application {
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
         let app_state = AppState {
             metrics_handle,
             reader: Arc::new(reader),
             publisher: Arc::new(publisher),
             lock: Arc::new(Semaphore::new(1)),
             replay: self.config.replay.clone(),
+            shutdown: shutdown_rx,
         };
 
         let app = Router::new()
@@ -87,13 +91,13 @@ impl Application {
         let listener = tokio::net::TcpListener::bind(binding_address).await?;
 
         axum::serve(listener, app)
-            .with_graceful_shutdown(Self::shutdown_signal())
+            .with_graceful_shutdown(Self::shutdown_signal(shutdown_tx))
             .await?;
 
         Ok(())
     }
 
-    async fn shutdown_signal() {
+    async fn shutdown_signal(tx: watch::Sender<bool>) {
         let ctrl_c = async {
             signal::ctrl_c()
                 .await
@@ -120,6 +124,7 @@ impl Application {
             },
         }
 
+        let _ = tx.send(true);
         warn!("Shutdown signal received, cleaning up...");
     }
 }

@@ -171,6 +171,13 @@ pub async fn replay(
     let mut stopped_reason: Option<String> = None;
 
     'outer: while current <= req.to_block {
+        if *state.shutdown.borrow() {
+            warn!(from = current, "replay stopped: shutdown signal received");
+            stopped_reason = Some("sigterm received".to_string());
+            resume_from = current;
+            break;
+        }
+
         let batch_to = current
             .saturating_add(state.reader.batch_size().saturating_sub(1))
             .min(req.to_block);
@@ -186,6 +193,16 @@ pub async fn replay(
         };
 
         for tx in &batch.transactions {
+            if *state.shutdown.borrow() {
+                warn!(
+                    block = tx.block_number,
+                    "replay stopped: shutdown signal received"
+                );
+                stopped_reason = Some("sigterm received".to_string());
+                resume_from = tx.block_number;
+                break 'outer;
+            }
+
             match state.publisher.publish_with_retry(tx).await {
                 Ok(outcome) => {
                     for event in &tx.events {

@@ -111,6 +111,7 @@ impl NatsError {
             PublishErrorKind::TimedOut
                 | PublishErrorKind::BrokenPipe
                 | PublishErrorKind::MaxAckPending
+                | PublishErrorKind::StreamNotFound
         )
     }
 }
