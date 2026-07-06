@@ -9,7 +9,7 @@ use axum_prometheus::{
 use tokio::signal;
 use tracing::{debug, info, warn};
 
-use crate::chain::{BlockReader, NoxEventParser};
+use crate::chain::{BlockReader, ChainClient, NoxEventParser};
 use crate::config::Config;
 use crate::events::{Operator, TransactionEvent};
 use crate::handlers;
@@ -45,16 +45,14 @@ impl Application {
         nats_client.setup_stream(&self.config.nats).await?;
 
         let parser = NoxEventParser::new(self.config.chain.contract_address);
-        let reader = BlockReader::new(
+        let client = ChainClient::new(
             &self.config.chain.rpc_endpoint,
-            parser,
-            self.config.chain.batch_size,
-            self.config.chain.retry_delay,
-            self.config.chain.max_retries,
+            parser.contract_address(),
+            parser.event_signatures(),
             self.config.chain.connect_timeout,
             self.config.chain.rpc_timeout,
-            self.config.chain.chain_id,
         )?;
+        let reader = BlockReader::new(client, parser, &self.config.chain);
 
         let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
 

@@ -7,6 +7,7 @@ use alloy::{primitives::FixedBytes, rpc::types::Log};
 use tokio::time::sleep;
 use tracing::warn;
 
+use crate::config::ChainConfig;
 use crate::error::RpcError;
 use crate::events::{
     ArithmeticOperation, BooleanOperation, BurnOperation, EncryptionOperation, MintOperation,
@@ -41,34 +42,20 @@ pub struct BlockReader {
 
 impl BlockReader {
     /// Create a new block reader
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        rpc_endpoint: &str,
-        parser: NoxEventParser,
-        batch_size: u64,
-        retry_delay: Duration,
-        max_retries: u32,
-        connect_timeout: Duration,
-        rpc_timeout: Duration,
-        chain_id: u32,
-    ) -> Result<Self, RpcError> {
-        assert!(batch_size > 0, "batch_size must be > 0");
-        let client = ChainClient::new(
-            rpc_endpoint,
-            parser.contract_address(),
-            parser.event_signatures(),
-            connect_timeout,
-            rpc_timeout,
-        )?;
-
-        Ok(Self {
+    pub fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
+        Self {
             client,
             parser,
-            batch_size,
-            retry_delay,
-            max_retries,
-            chain_id,
-        })
+            batch_size: config.batch_size,
+            retry_delay: config.retry_delay,
+            max_retries: config.max_retries,
+            chain_id: config.chain_id,
+        }
+    }
+
+    /// Fetch the latest block known to the chain
+    pub async fn latest_block(&self) -> Result<u64, RpcError> {
+        self.client.get_latest_block().await
     }
 
     /// Read a batch with bounded retries

@@ -54,6 +54,14 @@ impl ChainClient {
         })
     }
 
+    /// Fetch the latest block number known to the primary provider
+    pub async fn get_latest_block(&self) -> Result<u64, RpcError> {
+        self.primary_provider
+            .get_block_number()
+            .await
+            .map_err(|e| RpcError::Provider(e.to_string()))
+    }
+
     /// Fetch logs for a range of blocks
     pub async fn get_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<Log>, RpcError> {
         let filter = Filter::new()
