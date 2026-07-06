@@ -7,7 +7,7 @@ use alloy::{primitives::FixedBytes, rpc::types::Log};
 use tokio::time::sleep;
 use tracing::warn;
 
-use crate::error::ChainError;
+use crate::error::RpcError;
 use crate::events::{
     ArithmeticOperation, BooleanOperation, BurnOperation, EncryptionOperation, MintOperation,
     Operator, SafeArithmeticOperation, SelectOperation, TransactionEvent, TransactionMessage,
@@ -51,7 +51,7 @@ impl BlockReader {
         connect_timeout: Duration,
         rpc_timeout: Duration,
         chain_id: u32,
-    ) -> Result<Self, ChainError> {
+    ) -> Result<Self, RpcError> {
         assert!(batch_size > 0, "batch_size must be > 0");
         let client = ChainClient::new(
             rpc_endpoint,
@@ -72,7 +72,7 @@ impl BlockReader {
     }
 
     /// Read a batch with bounded retries
-    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, ChainError> {
+    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, RpcError> {
         let mut attempt = 0u32;
         loop {
             match self.read_batch(from, to).await {
@@ -102,7 +102,7 @@ impl BlockReader {
     /// Returns transactions grouped from the batch.
     /// Events within each transaction are sorted by log_index.
     /// Transactions are sorted by (block_number, first_log_index).
-    async fn read_batch(&self, start_block: u64, to: u64) -> Result<BatchResult, ChainError> {
+    async fn read_batch(&self, start_block: u64, to: u64) -> Result<BatchResult, RpcError> {
         if start_block > to {
             return Ok(BatchResult {
                 transactions: Vec::new(),

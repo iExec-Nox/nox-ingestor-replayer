@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
-use crate::error::ChainError;
+use crate::error::RpcError;
 
 /// Chain client wrapping alloy HTTP provider
 pub struct ChainClient {
@@ -27,16 +27,16 @@ impl ChainClient {
         event_signatures: Vec<B256>,
         connect_timeout: Duration,
         rpc_timeout: Duration,
-    ) -> Result<Self, ChainError> {
+    ) -> Result<Self, RpcError> {
         let primary_url = rpc_endpoint
             .parse()
-            .map_err(|e| ChainError::InvalidEndpoint(format!("{}: {}", rpc_endpoint, e)))?;
+            .map_err(|e| RpcError::InvalidEndpoint(format!("{}: {}", rpc_endpoint, e)))?;
 
         let http_client = reqwest::Client::builder()
             .connect_timeout(connect_timeout)
             .timeout(rpc_timeout)
             .build()
-            .map_err(|e| ChainError::InvalidEndpoint(format!("http client build: {e}")))?;
+            .map_err(|e| RpcError::InvalidEndpoint(format!("http client build: {e}")))?;
 
         let primary_provider = ProviderBuilder::new().connect_reqwest(http_client, primary_url);
 
@@ -55,7 +55,7 @@ impl ChainClient {
     }
 
     /// Fetch logs for a range of blocks
-    pub async fn get_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<Log>, ChainError> {
+    pub async fn get_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<Log>, RpcError> {
         let filter = Filter::new()
             .address(self.contract_address)
             .event_signature(self.event_signatures.clone())
@@ -65,6 +65,6 @@ impl ChainClient {
         self.primary_provider
             .get_logs(&filter)
             .await
-            .map_err(|e| ChainError::Provider(e.to_string()))
+            .map_err(|e| RpcError::Provider(e.to_string()))
     }
 }
