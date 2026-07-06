@@ -105,8 +105,13 @@ impl Publisher {
     }
 
     fn should_retry(err: &NatsError, attempt: u32, max_retries: u32) -> bool {
-        matches!(err, NatsError::PublishFailed { kind, .. } if NatsError::is_transient(*kind))
-            && attempt < max_retries
+        matches!(
+            err,
+            NatsError::PublishFailed {
+                transient: true,
+                ..
+            }
+        ) && attempt < max_retries
     }
 }
 
@@ -119,6 +124,7 @@ mod tests {
         NatsError::PublishFailed {
             kind: PublishErrorKind::TimedOut,
             message: "timed out".to_string(),
+            transient: true,
         }
     }
 
@@ -126,6 +132,7 @@ mod tests {
         NatsError::PublishFailed {
             kind: PublishErrorKind::Other,
             message: "invalid subject".to_string(),
+            transient: false,
         }
     }
 
