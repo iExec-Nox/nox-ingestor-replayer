@@ -46,6 +46,15 @@ pub enum NatsError {
     },
 }
 
+impl From<async_nats::jetstream::context::PublishError> for NatsError {
+    fn from(e: async_nats::jetstream::context::PublishError) -> Self {
+        NatsError::PublishFailed {
+            kind: e.kind(),
+            message: e.to_string(),
+        }
+    }
+}
+
 impl NatsError {
     /// Whether a publish error kind is worth retrying
     pub fn is_transient(kind: PublishErrorKind) -> bool {
