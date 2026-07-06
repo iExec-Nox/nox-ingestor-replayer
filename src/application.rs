@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use anyhow::Result;
 use axum::{Router, extract::FromRef, routing::get};
@@ -7,18 +8,30 @@ use axum_prometheus::{
     metrics_exporter_prometheus::PrometheusHandle,
 };
 use tokio::signal;
+use tokio::sync::{RwLock, Semaphore, watch};
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::chain::{BlockReader, ChainClient, NoxEventParser};
-use crate::config::Config;
+use crate::config::{Config, ReplayConfig};
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
+use crate::replay::ReplayJobStatus;
+
+/// Grace period to await an in-flight replay job before the NATS connection
+/// drops on shutdown. Hardcoded, not a config knob (deliberate).
+const REPLAY_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 
 #[derive(Clone)]
 pub struct AppState {
     pub metrics_handle: PrometheusHandle,
     pub reader: Arc<BlockReader>,
     pub publisher: Arc<Publisher>,
+    pub lock: Arc<Semaphore>,
+    pub replay: ReplayConfig,
+    pub shutdown: watch::Receiver<bool>,
+    pub job_status: Arc<RwLock<ReplayJobStatus>>,
+    pub replay_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl FromRef<AppState> for PrometheusHandle {
@@ -56,20 +69,30 @@ impl Application {
         let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics"])
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
+
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         let app_state = AppState {
             metrics_handle,
             reader: Arc::new(reader),
             publisher: Arc::new(publisher),
+            lock: Arc::new(Semaphore::new(1)),
+            replay: self.config.replay.clone(),
+            shutdown: shutdown_rx,
+            job_status: Arc::new(RwLock::new(ReplayJobStatus::default())),
+            replay_task: Arc::new(Mutex::new(None)),
         };
+        let replay_task = app_state.replay_task.clone();
 
         let app = Router::new()
             .route("/", get(handlers::root))
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
+            .route("/replay", axum::routing::post(handlers::replay))
+            .route("/replay/status", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);
@@ -79,13 +102,15 @@ impl Application {
         let listener = tokio::net::TcpListener::bind(binding_address).await?;
 
         axum::serve(listener, app)
-            .with_graceful_shutdown(Self::shutdown_signal())
+            .with_graceful_shutdown(Self::shutdown_signal(shutdown_tx))
             .await?;
+
+        await_replay_task(&replay_task, REPLAY_SHUTDOWN_GRACE).await;
 
         Ok(())
     }
 
-    async fn shutdown_signal() {
+    async fn shutdown_signal(tx: watch::Sender<bool>) {
         let ctrl_c = async {
             signal::ctrl_c()
                 .await
@@ -112,6 +137,88 @@ impl Application {
             },
         }
 
+        let _ = tx.send(true);
         warn!("Shutdown signal received, cleaning up...");
+    }
+}
+
+/// Await the in-flight replay task (if any) with a bounded grace period,
+/// aborting it if it hasn't finished by then. No-op if no task is stored.
+async fn await_replay_task(slot: &Mutex<Option<JoinHandle<()>>>, grace: Duration) {
+    let handle = slot.lock().unwrap().take();
+    let Some(handle) = handle else {
+        return;
+    };
+    let abort_handle = handle.abort_handle();
+
+    match tokio::time::timeout(grace, handle).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => warn!(error = %e, "replay task panicked during shutdown"),
+        Err(_) => {
+            warn!(
+                grace_secs = grace.as_secs(),
+                "replay task did not finish within shutdown grace period, aborting"
+            );
+            abort_handle.abort();
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn await_replay_task_is_noop_when_slot_is_empty() {
+        let slot: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
+        let grace = Duration::from_secs(30);
+
+        let start = tokio::time::Instant::now();
+        await_replay_task(&slot, grace).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < grace,
+            "expected near-immediate return, elapsed: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn await_replay_task_returns_immediately_when_task_already_finished() {
+        let handle = tokio::spawn(async {});
+        handle.await.unwrap();
+
+        let handle = tokio::spawn(async {});
+        let slot = Mutex::new(Some(handle));
+        let grace = Duration::from_secs(30);
+
+        let start = tokio::time::Instant::now();
+        await_replay_task(&slot, grace).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed < grace,
+            "expected near-immediate return, elapsed: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn await_replay_task_aborts_after_grace_period_elapses() {
+        let handle = tokio::spawn(async {
+            loop {
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+        });
+        let slot = Mutex::new(Some(handle));
+        let grace = Duration::from_secs(30);
+
+        let start = tokio::time::Instant::now();
+        await_replay_task(&slot, grace).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            elapsed >= grace,
+            "expected to wait out the full grace period before aborting, elapsed: {elapsed:?}"
+        );
     }
 }
