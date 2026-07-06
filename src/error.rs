@@ -1,10 +1,16 @@
 //! Error types for nox-ingestor-replayer
 
+use async_nats::jetstream::context::PublishErrorKind;
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
+use serde_json::json;
 use thiserror::Error;
+use tracing::warn;
 
 /// Chain/RPC related errors
 #[derive(Error, Debug)]
-pub enum ChainError {
+pub enum RpcError {
     #[error("Invalid RPC endpoint: {0}")]
     InvalidEndpoint(String),
 
@@ -29,4 +35,100 @@ pub enum NatsError {
 
     #[error("Stream setup error: {0}")]
     StreamSetup(String),
+
+    #[error("NATS unavailable")]
+    Unavailable,
+
+    #[error("Publish failed ({kind:?}): {message}")]
+    PublishFailed {
+        kind: PublishErrorKind,
+        message: String,
+    },
+}
+
+impl NatsError {
+    /// Whether a publish error kind is worth retrying
+    pub fn is_transient(kind: PublishErrorKind) -> bool {
+        matches!(
+            kind,
+            PublishErrorKind::TimedOut
+                | PublishErrorKind::BrokenPipe
+                | PublishErrorKind::MaxAckPending
+                | PublishErrorKind::StreamNotFound
+        )
+    }
+}
+
+/// Errors surfaced by the on-demand replay endpoint
+#[derive(Error, Debug)]
+pub enum ReplayError {
+    #[error("Unauthorized")]
+    Unauthorized,
+
+    #[error("Invalid range")]
+    InvalidRange,
+
+    #[error("Requested range beyond chain head (to: {to}, latest: {latest})")]
+    RangeBeyondHead { to: u64, latest: u64 },
+
+    #[error("Chain busy")]
+    ChainBusy,
+
+    #[error("RPC error: {source}")]
+    Rpc {
+        #[source]
+        source: RpcError,
+    },
+
+    #[error("NATS error: {source}")]
+    Nats {
+        #[source]
+        source: NatsError,
+    },
+}
+
+impl ReplayError {
+    fn status(&self) -> StatusCode {
+        match self {
+            ReplayError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ReplayError::InvalidRange | ReplayError::RangeBeyondHead { .. } => {
+                StatusCode::BAD_REQUEST
+            }
+            ReplayError::ChainBusy => StatusCode::CONFLICT,
+            ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
+        }
+    }
+
+    fn retryable(&self) -> bool {
+        matches!(
+            self,
+            ReplayError::ChainBusy | ReplayError::Nats { .. } | ReplayError::Rpc { .. }
+        )
+    }
+}
+
+impl ReplayError {
+    fn body(&self) -> serde_json::Value {
+        json!({
+            "error": {
+                "message": self.to_string(),
+                "retryable": self.retryable(),
+            }
+        })
+    }
+}
+
+impl IntoResponse for ReplayError {
+    fn into_response(self) -> Response {
+        let status = self.status();
+
+        if status.is_server_error() {
+            warn!(error = %self, status = %status, "replay request failed");
+        }
+
+        let body = self.body();
+
+        (status, Json(body)).into_response()
+    }
 }
