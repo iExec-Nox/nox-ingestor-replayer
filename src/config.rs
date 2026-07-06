@@ -38,6 +38,21 @@ pub struct Config {
     pub chain: ChainConfig,
     pub nats: NatsConfig,
     pub server: ServerConfig,
+    pub replay: ReplayConfig,
+}
+
+/// Configuration for the on-demand `POST /replay` endpoint.
+#[derive(Clone, Deserialize)]
+pub struct ReplayConfig {
+    pub api_key: String,
+}
+
+impl std::fmt::Debug for ReplayConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ReplayConfig")
+            .field("api_key", &"<redacted>")
+            .finish()
+    }
 }
 
 /// Chain/RPC configuration
