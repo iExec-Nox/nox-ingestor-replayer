@@ -43,29 +43,29 @@ pub enum NatsError {
     PublishFailed {
         kind: PublishErrorKind,
         message: String,
+        transient: bool,
     },
 }
 
 impl From<async_nats::jetstream::context::PublishError> for NatsError {
     fn from(e: async_nats::jetstream::context::PublishError) -> Self {
+        let kind = e.kind();
         NatsError::PublishFailed {
-            kind: e.kind(),
+            kind,
             message: e.to_string(),
+            transient: is_transient_publish_error(kind),
         }
     }
 }
 
-impl NatsError {
-    /// Whether a publish error kind is worth retrying
-    pub fn is_transient(kind: PublishErrorKind) -> bool {
-        matches!(
-            kind,
-            PublishErrorKind::TimedOut
-                | PublishErrorKind::BrokenPipe
-                | PublishErrorKind::MaxAckPending
-                | PublishErrorKind::StreamNotFound
-        )
-    }
+fn is_transient_publish_error(kind: PublishErrorKind) -> bool {
+    matches!(
+        kind,
+        PublishErrorKind::TimedOut
+            | PublishErrorKind::BrokenPipe
+            | PublishErrorKind::MaxAckPending
+            | PublishErrorKind::StreamNotFound
+    )
 }
 
 /// Errors surfaced by the on-demand replay endpoint
