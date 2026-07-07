@@ -1,5 +1,6 @@
 use tracing::error;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use validator::Validate;
 
 use crate::application::Application;
 use crate::config::Config;
@@ -30,6 +31,9 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::load().map_err(|e| {
         error!("Failed to load configuration: {e}");
         e
+    })?;
+    config.validate().inspect_err(|e| {
+        error!("Invalid configuration: {e}");
     })?;
 
     let app = Application::new(config)?;
