@@ -80,8 +80,14 @@ pub enum ReplayError {
     #[error("Requested range beyond chain head (to: {to}, latest: {latest})")]
     RangeBeyondHead { to: u64, latest: u64 },
 
-    #[error("Chain busy")]
-    ChainBusy,
+    #[error("Chain {chain_id} busy")]
+    ChainBusy { chain_id: u32 },
+
+    #[error("Chain {chain_id} not configured")]
+    ChainNotConfigured { chain_id: u32 },
+
+    #[error("At capacity (max {max} concurrent chains)")]
+    AtCapacity { max: usize },
 
     #[error("RPC error: {source}")]
     Rpc {
@@ -103,7 +109,9 @@ impl ReplayError {
             ReplayError::InvalidRange | ReplayError::RangeBeyondHead { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::ChainBusy => StatusCode::CONFLICT,
+            ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
+            ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
+            ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
         }
@@ -112,7 +120,10 @@ impl ReplayError {
     fn retryable(&self) -> bool {
         matches!(
             self,
-            ReplayError::ChainBusy | ReplayError::Nats { .. } | ReplayError::Rpc { .. }
+            ReplayError::ChainBusy { .. }
+                | ReplayError::AtCapacity { .. }
+                | ReplayError::Nats { .. }
+                | ReplayError::Rpc { .. }
         )
     }
 }
