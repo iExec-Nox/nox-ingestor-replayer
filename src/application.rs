@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -12,15 +13,14 @@ use axum_prometheus::{
     metrics_exporter_prometheus::PrometheusHandle,
 };
 use tokio::signal;
-use tokio::sync::{RwLock, Semaphore, watch};
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
-use crate::chain::{BlockReader, ChainClient, NoxEventParser};
-use crate::config::Config;
+use crate::chain::{BlockReader, ChainClient, ChainPipeline, ChainRegistry, NoxEventParser};
+use crate::config::{Config, ReplayConfig};
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
-use crate::replay::ReplayJobStatus;
 
 /// Grace period to await an in-flight replay job before the NATS connection
 /// drops on shutdown. Hardcoded, not a config knob (deliberate).
@@ -29,13 +29,9 @@ const REPLAY_SHUTDOWN_GRACE: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) metrics_handle: PrometheusHandle,
-    pub(crate) reader: Arc<BlockReader>,
-    pub(crate) publisher: Arc<Publisher>,
-    pub(crate) lock: Arc<Semaphore>,
-    pub(crate) api_key: String,
+    pub(crate) registry: Arc<ChainRegistry>,
+    pub(crate) replay: ReplayConfig,
     pub(crate) shutdown: watch::Receiver<bool>,
-    pub(crate) job_status: Arc<RwLock<ReplayJobStatus>>,
-    pub(crate) replay_task: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
 impl FromRef<AppState> for PrometheusHandle {
@@ -60,20 +56,27 @@ impl Application {
         let nats_client = Arc::new(NatsClient::connect(&self.config.nats).await?);
         nats_client.setup_stream(&self.config.nats).await?;
 
-        let parser = NoxEventParser::new(self.config.chain.contract_address);
-        let client = ChainClient::new(
-            &self.config.chain.rpc_endpoint,
-            parser.contract_address(),
-            parser.event_signatures(),
-            self.config.chain.connect_timeout,
-            self.config.chain.rpc_timeout,
-        )?;
-        let reader = BlockReader::new(client, parser, &self.config.chain);
-
-        let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
+        let mut pipelines = HashMap::with_capacity(self.config.chains.len());
+        for (chain_id, chain_config) in &self.config.chains {
+            let parser = NoxEventParser::new(chain_config.contract_address);
+            let client = ChainClient::new(
+                &chain_config.rpc_endpoint,
+                parser.contract_address(),
+                parser.event_signatures(),
+                chain_config.connect_timeout,
+                chain_config.rpc_timeout,
+            )?;
+            let reader = BlockReader::new(client, parser, chain_config, *chain_id);
+            let publisher = Publisher::new(nats_client.clone(), &self.config.nats);
+            pipelines.insert(*chain_id, ChainPipeline::new(reader, publisher));
+        }
+        let registry = Arc::new(ChainRegistry::new(
+            pipelines,
+            self.config.replay.max_concurrent_chains,
+        ));
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status", "/replay/{chain_id}"])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
@@ -81,22 +84,18 @@ impl Application {
 
         let app_state = AppState {
             metrics_handle,
-            reader: Arc::new(reader),
-            publisher: Arc::new(publisher),
-            lock: Arc::new(Semaphore::new(1)),
-            api_key: self.config.api_key.clone(),
+            registry: registry.clone(),
+            replay: self.config.replay.clone(),
             shutdown: shutdown_rx,
-            job_status: Arc::new(RwLock::new(ReplayJobStatus::default())),
-            replay_task: Arc::new(Mutex::new(None)),
         };
-        let replay_task = app_state.replay_task.clone();
 
         let app = Router::new()
             .route("/", get(handlers::root))
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
             .route("/replay", post(handlers::replay))
-            .route("/replay/status", get(handlers::replay_status))
+            .route("/replay/status", get(handlers::replay_status_legacy))
+            .route("/replay/{chain_id}", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);
@@ -109,7 +108,9 @@ impl Application {
             .with_graceful_shutdown(Self::shutdown_signal(shutdown_tx))
             .await?;
 
-        await_replay_task(&replay_task, REPLAY_SHUTDOWN_GRACE).await;
+        for pipeline in registry.pipelines.values() {
+            await_replay_task(&pipeline.replay_task, REPLAY_SHUTDOWN_GRACE).await;
+        }
 
         Ok(())
     }

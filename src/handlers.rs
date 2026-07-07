@@ -101,7 +101,7 @@ pub(crate) async fn replay(
     headers: axum::http::HeaderMap,
     Json(req): Json<ReplayRequest>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
-    check_api_key(&headers, &state.api_key)?;
+    check_api_key(&headers, &state.replay.api_key)?;
     validate_span(req.from_block, req.to_block)?;
 
     let pipeline = state
