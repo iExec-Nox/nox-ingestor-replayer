@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
+use tokio::sync::{RwLock, watch};
 use tracing::warn;
 
 use crate::chain::BlockReader;
@@ -96,18 +96,23 @@ pub(crate) struct ReplayAccepted {
 
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
-/// `permit` is held for the lifetime of the job and released (freeing the
-/// slot for a subsequent `POST /replay`) when this function returns.
+/// `hold` is held for the lifetime of the job and dropped (releasing whatever
+/// permit(s) it wraps — a single per-chain permit, or a `(chain, global)` pair
+/// for the multichain registry) when this function returns.
 ///
-/// On panic the permit still drops (409 recovers) but the slot is left in its
+/// On panic `hold` still drops (409/503 recovers) but the slot is left in its
 /// last `Running` state until the next job overwrites it — a panic here is a
 /// bug, not a modeled state.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
     shutdown: watch::Receiver<bool>,
-    permit: OwnedSemaphorePermit,
+    hold: impl Send + 'static,
     status: Arc<RwLock<ReplayJobStatus>>,
+    // Unused until PR10 wires per-chain metric labels; kept in the signature
+    // now so callers/tests don't need to change again for that PR.
+    _chain_id: u32,
     from_block: u64,
     to_block: u64,
 ) {
@@ -198,6 +203,6 @@ pub(crate) async fn run_replay_job(
 
     drop(slot);
 
-    // Release the permit now that the terminal status has been written to the slot.
-    drop(permit);
+    // Release the held permit(s) now that the terminal status has been written to the slot.
+    drop(hold);
 }
