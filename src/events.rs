@@ -5,6 +5,7 @@
 
 use alloy::primitives::{Address, keccak256};
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 /// Handle type for encrypted values (hex-encoded bytes32)
 pub type Handle = String;
@@ -182,5 +183,214 @@ impl TransactionMessage {
     /// Converts the transaction message to bytes for NATS
     pub fn to_bytes(&self) -> Result<Vec<u8>, serde_json::Error> {
         serde_json::to_vec(self)
+    }
+}
+
+pub fn log_event(event: &TransactionEvent) {
+    match &event.operator {
+        Operator::Add(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Add"
+            );
+        }
+        Operator::Sub(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Sub"
+            );
+        }
+        Operator::Mul(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Mul"
+            );
+        }
+        Operator::Div(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Div"
+            );
+        }
+        Operator::SafeAdd(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                success = op.success,
+                result = op.result,
+                "SafeAdd"
+            );
+        }
+        Operator::SafeSub(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                success = op.success,
+                result = op.result,
+                "SafeSub"
+            );
+        }
+        Operator::SafeMul(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                success = op.success,
+                result = op.result,
+                "SafeMul"
+            );
+        }
+        Operator::SafeDiv(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                success = op.success,
+                result = op.result,
+                "SafeDiv"
+            );
+        }
+        Operator::Eq(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Eq"
+            );
+        }
+        Operator::Ne(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Ne"
+            );
+        }
+        Operator::Ge(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Ge"
+            );
+        }
+        Operator::Gt(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Gt"
+            );
+        }
+        Operator::Le(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Le"
+            );
+        }
+        Operator::Lt(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                leftHandOperand = op.left_hand_operand,
+                rightHandOperand = op.right_hand_operand,
+                result = op.result,
+                "Lt"
+            );
+        }
+        Operator::Select(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                condition = op.condition,
+                if_true = op.if_true,
+                if_false = op.if_false,
+                result = op.result,
+                "Select"
+            );
+        }
+        Operator::Transfer(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                balanceFrom = op.balance_from,
+                balanceTo = op.balance_to,
+                amount = op.amount,
+                success = op.success,
+                newBalanceFrom = op.new_balance_from,
+                newBalanceTo = op.new_balance_to,
+                "Transfer"
+            );
+        }
+        Operator::Mint(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                balanceTo = op.balance_to,
+                amount = op.amount,
+                totalSupply = op.total_supply,
+                success = op.success,
+                newBalanceTo = op.new_balance_to,
+                newTotalSupply = op.new_total_supply,
+                "Mint"
+            );
+        }
+        Operator::Burn(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                balanceFrom = op.balance_from,
+                amount = op.amount,
+                totalSupply = op.total_supply,
+                success = op.success,
+                newBalanceFrom = op.new_balance_from,
+                newTotalSupply = op.new_total_supply,
+                "Burn"
+            );
+        }
+        Operator::WrapAsPublicHandle(op) => {
+            debug!(
+                log_index = event.log_index,
+                caller = format!("{:#x}", event.caller),
+                value = op.value,
+                tee_type = op.tee_type,
+                handle = op.handle,
+                "WrapAsPublicHandle"
+            )
+        }
     }
 }
