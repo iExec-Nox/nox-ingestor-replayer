@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    extract::State,
+    extract::{Path, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
@@ -88,13 +88,14 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
     }
 }
 
-/// `POST /replay` accepts a block range and replays it in a background task,
-/// publishing each transaction to NATS.
+/// `POST /replay` accepts a chain ID and a block range and replays it in a
+/// background task, publishing each transaction to NATS.
 ///
-/// Pre-flight failures (auth, validation, busy, NATS/RPC pre-checks) return an
-/// error status synchronously. Once accepted, the replay runs asynchronously;
-/// progress and the terminal outcome are available via `GET /replay/status`.
-/// Retries and resumes reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
+/// Pre-flight failures (auth, validation, unknown chain, busy, at-capacity,
+/// NATS/RPC pre-checks) return an error status synchronously. Once accepted,
+/// the replay runs asynchronously; progress and the terminal outcome are
+/// available via `GET /replay/{chain_id}`. Retries and resumes reuse the
+/// deterministic `Nats-Msg-Id`, so JetStream dedups them.
 pub(crate) async fn replay(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -103,37 +104,56 @@ pub(crate) async fn replay(
     check_api_key(&headers, &state.api_key)?;
     validate_span(req.from_block, req.to_block)?;
 
-    let permit = state
-        .lock
+    let pipeline = state
+        .registry
+        .get(req.chain_id)
+        .ok_or(ReplayError::ChainNotConfigured {
+            chain_id: req.chain_id,
+        })?;
+
+    let chain_permit =
+        pipeline
+            .lock
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ReplayError::ChainBusy {
+                chain_id: req.chain_id,
+            })?;
+    let global_permit = state
+        .registry
+        .global
         .clone()
         .try_acquire_owned()
-        .map_err(|_| ReplayError::ChainBusy)?;
+        .map_err(|_| ReplayError::AtCapacity {
+            max: state.replay.max_concurrent_chains,
+        })?;
 
-    if !state.publisher.is_connected() {
+    if !pipeline.publisher.is_connected() {
         return Err(ReplayError::Nats {
             source: NatsError::Unavailable,
         });
     }
-    let latest = state
+    let latest = pipeline
         .reader
         .latest_block()
         .await
         .map_err(|source| ReplayError::Rpc { source })?;
     check_within_head(req.to_block, latest)?;
 
-    *state.job_status.write().await = ReplayJobStatus::running(req.from_block, req.to_block);
+    *pipeline.job_status.write().await = ReplayJobStatus::running(req.from_block, req.to_block);
 
     let handle = tokio::spawn(run_replay_job(
-        state.reader.clone(),
-        state.publisher.clone(),
+        pipeline.reader.clone(),
+        pipeline.publisher.clone(),
         state.shutdown.clone(),
-        permit,
-        state.job_status.clone(),
+        (chain_permit, global_permit),
+        pipeline.job_status.clone(),
+        req.chain_id,
         req.from_block,
         req.to_block,
     ));
     // Poisoning is all but impossible: the guard is never held across an `.await` and no holder panics.
-    *state
+    *pipeline
         .replay_task
         .lock()
         .expect("replay_task mutex poisoned") = Some(handle);
@@ -147,10 +167,47 @@ pub(crate) async fn replay(
     ))
 }
 
-/// `GET /replay/status` returns the current (or most recent) replay job status.
+/// `GET /replay/{chain_id}` returns the current (or most recent) replay job
+/// status for that chain. Deliberately NOT a `ReplayError` — an unknown chain
+/// here is a plain 404, not a request outcome we want folded into replay
+/// request metrics.
 pub(crate) async fn replay_status(
     State(state): State<AppState>,
-) -> Result<Json<ReplayJobStatus>, ReplayError> {
-    let status = state.job_status.read().await.clone();
+    Path(chain_id): Path<u32>,
+) -> Result<Json<ReplayJobStatus>, (StatusCode, Json<Value>)> {
+    let pipeline = state.registry.get(chain_id).ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {
+                    "kind": "chain_not_configured",
+                    "message": format!("chain {chain_id} not configured"),
+                    "retryable": false,
+                }
+            })),
+        )
+    })?;
+    let status = pipeline.job_status.read().await.clone();
     Ok(Json(status))
+}
+
+/// `GET /replay/status` returns the current (or most recent) replay job
+/// status for the lowest-numbered configured chain. Legacy single-chain
+/// compat path predating multichain support; prefer `GET /replay/{chain_id}`.
+pub(crate) async fn replay_status_legacy(
+    State(state): State<AppState>,
+) -> Result<Json<ReplayJobStatus>, (StatusCode, Json<Value>)> {
+    let chain_id = state.registry.pipelines.keys().min().copied().ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {
+                    "kind": "chain_not_configured",
+                    "message": "no chains configured",
+                    "retryable": false,
+                }
+            })),
+        )
+    })?;
+    replay_status(State(state), Path(chain_id)).await
 }

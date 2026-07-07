@@ -80,9 +80,10 @@ impl ReplayJobStatus {
     }
 }
 
-/// Request body for `POST /replay`: the inclusive block range to replay.
+/// Request body for `POST /replay`: which chain, and the inclusive block range to replay.
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct ReplayRequest {
+    pub(crate) chain_id: u32,
     pub(crate) from_block: u64,
     pub(crate) to_block: u64,
 }
