@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use alloy::primitives::Address;
@@ -33,31 +34,33 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct Config {
-    pub(crate) chain: ChainConfig,
+    pub(crate) chains: HashMap<u32, ChainConfig>,
     pub(crate) nats: NatsConfig,
     pub(crate) server: ServerConfig,
-    pub(crate) api_key: String,
+    pub(crate) replay: ReplayConfig,
 }
 
-impl std::fmt::Debug for Config {
+/// Configuration for the on-demand `POST /replay` endpoint.
+#[derive(Clone, Deserialize)]
+pub(crate) struct ReplayConfig {
+    pub(crate) api_key: String,
+    /// Global cap on concurrently-running replay jobs across all chains (default: 20).
+    pub(crate) max_concurrent_chains: usize,
+}
+
+impl std::fmt::Debug for ReplayConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("chain", &self.chain)
-            .field("nats", &self.nats)
-            .field("server", &self.server)
+        f.debug_struct("ReplayConfig")
             .field("api_key", &"<redacted>")
             .finish()
     }
 }
 
-/// Chain/RPC configuration
+/// Chain/RPC configuration. The chain ID is the `chains` map key, not a field here.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ChainConfig {
-    /// Chain ID (default: 421614 for Arbitrum Sepolia)
-    pub(crate) chain_id: u32,
-
     /// RPC endpoint URL
     pub(crate) rpc_endpoint: String,
 
@@ -144,20 +147,7 @@ impl Config {
         let config = ConfigBuilder::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", "8080")?
-            .set_default("chain.chain_id", 421614)?
-            .set_default(
-                "chain.rpc_endpoint",
-                "https://arbitrum-sepolia-rpc.publicnode.com",
-            )?
-            .set_default(
-                "chain.contract_address",
-                "0x0000000000000000000000000000000000000000",
-            )?
-            .set_default("chain.batch_size", 50)?
-            .set_default("chain.retry_delay", "250ms")?
-            .set_default("chain.max_retries", 5)?
-            .set_default("chain.connect_timeout", "10s")?
-            .set_default("chain.rpc_timeout", "30s")?
+            .set_default("replay.max_concurrent_chains", 20)?
             .set_default(
                 "nats.urls",
                 vec![
@@ -197,5 +187,64 @@ impl Config {
     /// Returns the `host:port` string used to bind the HTTP listener.
     pub(crate) fn binding_address(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chains_map_deserializes_one_entry_keyed_by_chain_id() {
+        let built = ConfigBuilder::builder()
+            .set_override("chains.421614.rpc_endpoint", "http://localhost:8545")
+            .unwrap()
+            .set_override(
+                "chains.421614.contract_address",
+                "0x0000000000000000000000000000000000000001",
+            )
+            .unwrap()
+            .set_override("chains.421614.batch_size", 50)
+            .unwrap()
+            .set_override("chains.421614.retry_delay", "250ms")
+            .unwrap()
+            .set_override("chains.421614.max_retries", 5)
+            .unwrap()
+            .set_override("nats.urls", vec!["nats://localhost:4222"])
+            .unwrap()
+            .set_override("nats.tls.enabled", false)
+            .unwrap()
+            .set_override("nats.num_replicas", 1)
+            .unwrap()
+            .set_override("nats.stream_name", "s")
+            .unwrap()
+            .set_override("nats.subject", "s")
+            .unwrap()
+            .set_override("nats.retention", "1d")
+            .unwrap()
+            .set_override("nats.duplicate_window", "10m")
+            .unwrap()
+            .set_override("nats.reconnect_delay", "1s")
+            .unwrap()
+            .set_override("nats.max_reconnect_delay", "30s")
+            .unwrap()
+            .set_override("nats.publish_retry_delay", "250ms")
+            .unwrap()
+            .set_override("nats.publish_max_retries", 5)
+            .unwrap()
+            .set_override("server.host", "127.0.0.1")
+            .unwrap()
+            .set_override("server.port", 8080)
+            .unwrap()
+            .set_override("replay.api_key", "k")
+            .unwrap()
+            .set_override("replay.max_concurrent_chains", 20)
+            .unwrap()
+            .build()
+            .unwrap();
+
+        let cfg: Config = built.try_deserialize().unwrap();
+        assert_eq!(cfg.chains.len(), 1);
+        assert!(cfg.chains.contains_key(&421614));
     }
 }
