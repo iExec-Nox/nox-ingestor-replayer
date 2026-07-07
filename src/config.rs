@@ -1,13 +1,16 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::time::Duration;
 
 use alloy::primitives::Address;
 use config::{Config as ConfigBuilder, ConfigError, Environment};
 use config_secret::EnvironmentSecretFile;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use validator::{Validate, ValidationError};
 
 /// TLS certificate configuration for mTLS client authentication.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Validate)]
+#[validate(schema(function = "validate_tls_certs"))]
 pub(crate) struct TlsConfig {
     /// Whether mTLS is enabled (`NOX_REPLAYER_NATS__TLS__ENABLED`, default `true`).
     /// Set to `false` for dev / Tenderly VM to connect to a plain NATS server.
@@ -34,17 +37,43 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+fn validate_tls_certs(cfg: &TlsConfig) -> Result<(), ValidationError> {
+    if cfg.enabled && (cfg.ca.is_empty() || cfg.cert.is_empty() || cfg.key.is_empty()) {
+        return Err(
+            ValidationError::new("tls_certs_required").with_message(Cow::from(
+                "tls.ca, tls.cert, and tls.key must all be set when tls.enabled is true",
+            )),
+        );
+    }
+    Ok(())
+}
+
+fn validate_chains_not_empty(chains: &HashMap<u32, ChainConfig>) -> Result<(), ValidationError> {
+    if chains.is_empty() {
+        return Err(ValidationError::new("chains_empty").with_message(Cow::from(
+            "at least one chain must be configured via NOX_REPLAYER_CHAINS__<chain_id>__*",
+        )));
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Validate)]
 pub(crate) struct Config {
+    #[validate(nested)]
+    #[validate(custom(function = "validate_chains_not_empty"))]
     pub(crate) chains: HashMap<u32, ChainConfig>,
+    #[validate(nested)]
     pub(crate) nats: NatsConfig,
+    #[validate(nested)]
     pub(crate) server: ServerConfig,
+    #[validate(nested)]
     pub(crate) replay: ReplayConfig,
 }
 
 /// Configuration for the on-demand `POST /replay` endpoint.
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Validate)]
 pub(crate) struct ReplayConfig {
+    #[validate(length(min = 1))]
     pub(crate) api_key: String,
     /// Global cap on concurrently-running replay jobs across all chains (default: 20).
     pub(crate) max_concurrent_replay_jobs: usize,
@@ -63,15 +92,18 @@ impl std::fmt::Debug for ReplayConfig {
 }
 
 /// Chain/RPC configuration. The chain ID is the `chains` map key, not a field here.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Validate)]
 pub(crate) struct ChainConfig {
     /// RPC endpoint URL
+    #[validate(url)]
     pub(crate) rpc_endpoint: String,
 
     /// Contract address to monitor
+    #[validate(custom(function = "validate_non_zero_address"))]
     pub(crate) contract_address: Address,
 
     /// Number of blocks to fetch per batch (default: 50)
+    #[validate(range(min = 1))]
     pub(crate) batch_size: u64,
 
     /// Delay between retries (default: "250ms")
@@ -79,6 +111,7 @@ pub(crate) struct ChainConfig {
     pub(crate) retry_delay: Duration,
 
     /// Bounded retry attempts for a failing batch read
+    #[validate(range(max = 10))]
     pub(crate) max_retries: u32,
 
     /// TCP connection timeout. Default `5s`.
@@ -98,22 +131,50 @@ fn default_rpc_timeout() -> Duration {
     Duration::from_secs(8)
 }
 
+fn validate_non_zero_address(address: &Address) -> Result<(), ValidationError> {
+    if *address == Address::ZERO {
+        return Err(ValidationError::new("address_is_zero")
+            .with_message(Cow::from("contract address must not be the zero address")));
+    }
+    Ok(())
+}
+
+#[allow(clippy::ptr_arg)]
+fn validate_nats_urls(urls: &Vec<String>) -> Result<(), ValidationError> {
+    if urls.is_empty() {
+        return Err(ValidationError::new("nats_urls_empty")
+            .with_message(Cow::from("nats.urls must contain at least one URL")));
+    }
+    for u in urls {
+        if !u.starts_with("nats://") && !u.starts_with("tls://") {
+            return Err(ValidationError::new("nats_url_invalid_scheme")
+                .with_message(Cow::from("each nats url must start with nats:// or tls://")));
+        }
+    }
+    Ok(())
+}
+
 /// NATS JetStream configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Validate)]
 pub(crate) struct NatsConfig {
     /// NATS server URLs (`NOX_REPLAYER_NATS__URLS`, comma-separated)
+    #[validate(custom(function = "validate_nats_urls"))]
     pub(crate) urls: Vec<String>,
 
     /// TLS client certificate configuration
+    #[validate(nested)]
     pub(crate) tls: TlsConfig,
 
     /// JetStream stream replica count (`NOX_REPLAYER_NATS__NUM_REPLICAS`, default `3`)
+    #[validate(range(min = 1))]
     pub(crate) num_replicas: u32,
 
     /// JetStream stream name
+    #[validate(length(min = 1))]
     pub(crate) stream_name: String,
 
     /// Subject prefix for events
+    #[validate(length(min = 1))]
     pub(crate) subject: String,
 
     /// Stream retention (default: "1d")
@@ -140,8 +201,9 @@ pub(crate) struct NatsConfig {
     pub(crate) publish_max_retries: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Validate)]
 pub(crate) struct ServerConfig {
+    #[validate(length(min = 1))]
     pub(crate) host: String,
     pub(crate) port: u16,
 }
