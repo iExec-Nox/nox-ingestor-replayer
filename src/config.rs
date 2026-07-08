@@ -112,6 +112,13 @@ pub struct NatsConfig {
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
     pub max_reconnect_delay: Duration,
+
+    /// Delay between publish retries (default: "250ms")
+    #[serde(with = "humantime_serde")]
+    pub publish_retry_delay: Duration,
+
+    /// Bounded retry attempts for a transient publish failure
+    pub publish_max_retries: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -158,6 +165,8 @@ impl Config {
             .set_default("nats.duplicate_window", "10m")?
             .set_default("nats.reconnect_delay", "1s")?
             .set_default("nats.max_reconnect_delay", "30s")?
+            .set_default("nats.publish_retry_delay", "250ms")?
+            .set_default("nats.publish_max_retries", 5)?
             .add_source(
                 Environment::with_prefix("NOX_REPLAYER")
                     .prefix_separator("_")
