@@ -53,10 +53,8 @@ impl Publisher {
         let ack = self
             .jetstream
             .publish_with_headers(subject.clone(), headers, payload.into())
-            .await
-            .map_err(NatsError::from)?
-            .await
-            .map_err(NatsError::from)?;
+            .await?
+            .await?;
 
         debug!(
             subject,
