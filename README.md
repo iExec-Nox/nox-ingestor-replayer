@@ -94,6 +94,8 @@ Configuration is loaded from environment variables with the `NOX_REPLAYER_` pref
 | `NOX_REPLAYER_NATS__DUPLICATE_WINDOW` | JetStream deduplication window | No | `10m` |
 | `NOX_REPLAYER_NATS__RECONNECT_DELAY` | Initial delay before reconnecting to NATS | No | `1s` |
 | `NOX_REPLAYER_NATS__MAX_RECONNECT_DELAY` | Maximum reconnect backoff | No | `30s` |
+| `NOX_REPLAYER_NATS__PUBLISH_RETRY_DELAY` | Delay between retries on a transient publish failure | No | `250ms` |
+| `NOX_REPLAYER_NATS__PUBLISH_MAX_RETRIES` | Max retry attempts for a transient publish failure before giving up | No | `5` |
 | `NOX_REPLAYER_NATS__WAIT_INTERVAL` | Poll interval while NATS is offline | No | `1s` |
 | `NOX_REPLAYER_NATS__BUFFER_CAPACITY` | In-memory message buffer size when NATS is offline | No | `1000` |
 
