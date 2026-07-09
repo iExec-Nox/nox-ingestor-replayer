@@ -14,7 +14,7 @@ use crate::nats::Publisher;
 
 /// Lifecycle state of the single replay job slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum JobState {
+pub(crate) enum JobState {
     Idle,
     Running,
     Completed,
@@ -23,70 +23,31 @@ pub enum JobState {
 
 /// Snapshot of the current (or most recent) replay job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReplayJobStatus {
-    pub state: JobState,
-    pub from_block: u64,
-    pub to_block: u64,
-    /// Resume position -- same semantics as the old `next_block`.
-    /// Running: next unprocessed block. Stopped: block to resume from.
-    /// Completed: to_block.saturating_add(1).
-    pub current_block: u64,
-    pub transactions_published: u64,
-    pub events_total: u64,
-    pub duplicates: u64,
-    pub started_at: Option<DateTime<Utc>>,
-    pub finished_at: Option<DateTime<Utc>>,
-    pub duration_ms: u64,
-    pub stopped_reason: Option<String>,
+pub(crate) struct ReplayJobStatus {
+    pub(crate) state: JobState,
+    pub(crate) from_block: u64,
+    pub(crate) to_block: u64,
+    pub(crate) current_block: u64,
+    pub(crate) transactions_published: u64,
+    pub(crate) events_total: u64,
+    pub(crate) duplicates: u64,
+    pub(crate) started_at: Option<DateTime<Utc>>,
+    pub(crate) finished_at: Option<DateTime<Utc>>,
+    pub(crate) duration_ms: u64,
+    pub(crate) stopped_reason: Option<String>,
 }
 
-impl Default for ReplayJobStatus {
-    fn default() -> Self {
-        Self {
-            state: JobState::Idle,
-            from_block: 0,
-            to_block: 0,
-            current_block: 0,
-            transactions_published: 0,
-            events_total: 0,
-            duplicates: 0,
-            started_at: None,
-            finished_at: None,
-            duration_ms: 0,
-            stopped_reason: None,
-        }
-    }
-}
-
-impl ReplayJobStatus {
-    /// Fresh `Running` status; used by the POST handler before spawning the job.
-    pub fn running(from_block: u64, to_block: u64) -> Self {
-        Self {
-            state: JobState::Running,
-            from_block,
-            to_block,
-            current_block: from_block,
-            started_at: Some(Utc::now()),
-            ..Default::default()
-        }
-    }
-}
-
-/// Run a replay job to completion, writing progress into `slot` as it goes.
+/// Run a replay job to completion, writing progress into `status` as it goes.
 ///
-/// `permit` is held for the lifetime of the job and released (freeing the
-/// slot for a subsequent `POST /replay`) when this function returns.
-///
-/// On panic the permit still drops (409 recovers) but the slot is left in its
-/// last `Running` state until the next job overwrites it — a panic here is a
-/// bug, not a modeled state.
+/// `permit` is held for the lifetime of the job and dropped when this
+/// function returns, freeing the concurrency slot for another job.
 #[allow(dead_code)]
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
     shutdown: watch::Receiver<bool>,
     permit: OwnedSemaphorePermit,
-    slot: Arc<RwLock<ReplayJobStatus>>,
+    status: Arc<RwLock<ReplayJobStatus>>,
     from_block: u64,
     to_block: u64,
 ) {
@@ -154,33 +115,33 @@ pub(crate) async fn run_replay_job(
 
         current = batch_to.saturating_add(1);
 
-        let mut s = slot.write().await;
-        s.current_block = current;
-        s.transactions_published = transactions_published;
-        s.events_total = events_total;
-        s.duplicates = duplicates;
-        s.duration_ms = start.elapsed().as_millis() as u64;
+        let mut slot = status.write().await;
+        slot.current_block = current;
+        slot.transactions_published = transactions_published;
+        slot.events_total = events_total;
+        slot.duplicates = duplicates;
+        slot.duration_ms = start.elapsed().as_millis() as u64;
     }
 
-    let mut s = slot.write().await;
-    s.transactions_published = transactions_published;
-    s.events_total = events_total;
-    s.duplicates = duplicates;
-    s.duration_ms = start.elapsed().as_millis() as u64;
-    s.finished_at = Some(Utc::now());
+    let mut slot = status.write().await;
+    slot.transactions_published = transactions_published;
+    slot.events_total = events_total;
+    slot.duplicates = duplicates;
+    slot.duration_ms = start.elapsed().as_millis() as u64;
+    slot.finished_at = Some(Utc::now());
     match stopped_reason {
         None => {
-            s.state = JobState::Completed;
-            s.current_block = to_block.saturating_add(1);
-            s.stopped_reason = None;
+            slot.state = JobState::Completed;
+            slot.current_block = to_block.saturating_add(1);
+            slot.stopped_reason = None;
         }
         Some(reason) => {
-            s.state = JobState::Stopped;
-            s.current_block = resume_from;
-            s.stopped_reason = Some(reason);
+            slot.state = JobState::Stopped;
+            slot.current_block = resume_from;
+            slot.stopped_reason = Some(reason);
         }
     }
-    drop(s);
+    drop(slot);
 
     // Release the permit now that the terminal status has been written to the slot.
     drop(permit);
