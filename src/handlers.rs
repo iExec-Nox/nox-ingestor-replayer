@@ -148,6 +148,9 @@ pub(crate) async fn replay(
 }
 
 /// `GET /replay/status` returns the current (or most recent) replay job status.
-pub(crate) async fn replay_status(State(state): State<AppState>) -> Json<ReplayJobStatus> {
-    Json(state.job_status.read().await.clone())
+pub(crate) async fn replay_status(
+    State(state): State<AppState>,
+) -> Result<Json<ReplayJobStatus>, ReplayError> {
+    let status = state.job_status.read().await.clone();
+    Ok(Json(status))
 }
