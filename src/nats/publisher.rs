@@ -27,7 +27,7 @@ pub struct Publisher {
 }
 
 impl Publisher {
-    pub fn new(nats: Arc<NatsClient>, config: &NatsConfig) -> Self {
+    pub(crate) fn new(nats: Arc<NatsClient>, config: &NatsConfig) -> Self {
         Self {
             jetstream: nats.jetstream(),
             nats,
