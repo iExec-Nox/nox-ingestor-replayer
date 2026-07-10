@@ -42,7 +42,7 @@ pub struct BlockReader {
 
 impl BlockReader {
     /// Create a new block reader
-    pub fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
+    pub(crate) fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
         Self {
             client,
             parser,
