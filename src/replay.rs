@@ -13,8 +13,9 @@ use crate::events::log_event;
 use crate::nats::Publisher;
 
 /// Lifecycle state of the single replay job slot.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub(crate) enum JobState {
+    #[default]
     Idle,
     Running,
     Completed,
@@ -33,7 +34,7 @@ pub(crate) enum StopReason {
 }
 
 /// Snapshot of the current (or most recent) replay job.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ReplayJobStatus {
     pub(crate) state: JobState,
     pub(crate) from_block: u64,
@@ -62,11 +63,27 @@ impl ReplayProgress {
     }
 }
 
+impl ReplayJobStatus {
+    /// Fresh `Running` status; used by the POST handler before spawning the job.
+    pub(crate) fn running(from_block: u64, to_block: u64) -> Self {
+        Self {
+            state: JobState::Running,
+            from_block,
+            to_block,
+            progress: ReplayProgress {
+                current_block: from_block,
+                ..Default::default()
+            },
+            started_at: Some(Utc::now()),
+            ..Default::default()
+        }
+    }
+}
+
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
 /// `permit` is held for the lifetime of the job and dropped when this
 /// function returns, freeing the concurrency slot for another job.
-#[allow(dead_code)]
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
