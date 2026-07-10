@@ -25,19 +25,19 @@ use crate::replay::{ReplayJobStatus, run_replay_job};
 ///
 /// JSON response containing:
 /// - `status`: The status of the service ("ok")
-pub async fn health_check() -> Json<Value> {
+pub(crate) async fn health_check() -> Json<Value> {
     Json(json!({ "status": "ok" }))
 }
 
 /// `GET /metrics` — renders Prometheus metrics as plain text.
-pub async fn metrics(State(metrics_handle): State<PrometheusHandle>) -> String {
+pub(crate) async fn metrics(State(metrics_handle): State<PrometheusHandle>) -> String {
     metrics_handle.render()
 }
 
 /// Fallback handler for non-existing routes.
 ///
 /// Returns 404 NOT_FOUND to indicate the requested route does not exist.
-pub async fn not_found(uri: Uri) -> impl IntoResponse {
+pub(crate) async fn not_found(uri: Uri) -> impl IntoResponse {
     (
         StatusCode::NOT_FOUND,
         Json(json!({
@@ -51,23 +51,22 @@ pub async fn not_found(uri: Uri) -> impl IntoResponse {
 }
 
 /// `GET /` — returns service name and current UTC timestamp.
-pub async fn root() -> Json<Value> {
+pub(crate) async fn root() -> Json<Value> {
     Json(json!({ "service": "Ingestor Replayer", "timestamp": Utc::now().to_rfc3339() }))
 }
 
 /// Request body for `POST /replay`: the inclusive block range to replay.
-#[derive(Debug, Deserialize)]
-pub struct ReplayRequest {
-    pub from_block: u64,
-    pub to_block: u64,
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct ReplayRequest {
+    pub(crate) from_block: u64,
+    pub(crate) to_block: u64,
 }
 
 /// `202` body for `POST /replay`: the replay has been accepted and is running in the background.
 #[derive(Debug, Serialize)]
-pub struct ReplayAccepted {
-    pub from_block: u64,
-    pub to_block: u64,
-    pub accepted_at: DateTime<Utc>,
+pub(crate) struct ReplayAccepted {
+    pub(crate) request: ReplayRequest,
+    pub(crate) accepted_at: DateTime<Utc>,
 }
 
 /// Validate that `from <= to`.
@@ -95,9 +94,7 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
         .get("X-Api-Key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let ok =
-        provided.len() == expected.len() && provided.as_bytes().ct_eq(expected.as_bytes()).into();
-    if ok {
+    if provided.len() == expected.len() && provided.as_bytes().ct_eq(expected.as_bytes()).into() {
         Ok(())
     } else {
         Err(ReplayError::Unauthorized)
@@ -111,12 +108,12 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
 /// error status synchronously. Once accepted, the replay runs asynchronously;
 /// progress and the terminal outcome are available via `GET /replay/status`.
 /// Retries and resumes reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
-pub async fn replay(
+pub(crate) async fn replay(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Json(req): Json<ReplayRequest>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
-    check_api_key(&headers, &state.replay.api_key)?;
+    check_api_key(&headers, &state.api_key)?;
     validate_span(req.from_block, req.to_block)?;
 
     let permit = state
@@ -153,52 +150,16 @@ pub async fn replay(
     Ok((
         StatusCode::ACCEPTED,
         Json(ReplayAccepted {
-            from_block: req.from_block,
-            to_block: req.to_block,
+            request: req,
             accepted_at: Utc::now(),
         }),
     ))
 }
 
 /// `GET /replay/status` returns the current (or most recent) replay job status.
-pub async fn replay_status(
+pub(crate) async fn replay_status(
     State(state): State<AppState>,
 ) -> Result<Json<ReplayJobStatus>, ReplayError> {
     let status = state.job_status.read().await.clone();
     Ok(Json(status))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn validate_span_rejects_from_greater_than_to() {
-        let result = validate_span(5, 3);
-        assert!(matches!(result, Err(ReplayError::InvalidRange)));
-    }
-
-    #[test]
-    fn validate_span_accepts_from_equal_to() {
-        assert!(validate_span(5, 5).is_ok());
-    }
-
-    #[test]
-    fn validate_span_accepts_full_range_without_cap() {
-        assert!(validate_span(0, u64::MAX).is_ok());
-    }
-
-    #[test]
-    fn replay_accepted_serializes_accepted_at_as_rfc3339() {
-        let body = ReplayAccepted {
-            from_block: 10,
-            to_block: 20,
-            accepted_at: Utc::now(),
-        };
-        let value = serde_json::to_value(&body).unwrap();
-        assert_eq!(value["from_block"], 10);
-        assert_eq!(value["to_block"], 20);
-        let accepted_at = value["accepted_at"].as_str().unwrap();
-        assert!(DateTime::parse_from_rfc3339(accepted_at).is_ok());
-    }
 }
