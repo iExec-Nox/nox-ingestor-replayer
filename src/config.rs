@@ -38,7 +38,7 @@ pub(crate) struct Config {
     pub(crate) chain: ChainConfig,
     pub(crate) nats: NatsConfig,
     pub(crate) server: ServerConfig,
-    pub(crate) replay: ReplayConfig,
+    pub(crate) api_key: String,
 }
 
 impl std::fmt::Debug for Config {
@@ -47,20 +47,6 @@ impl std::fmt::Debug for Config {
             .field("chain", &self.chain)
             .field("nats", &self.nats)
             .field("server", &self.server)
-            .field("replay", &self.replay)
-            .finish()
-    }
-}
-
-/// Configuration for the on-demand `POST /replay` endpoint.
-#[derive(Clone, Deserialize)]
-pub(crate) struct ReplayConfig {
-    pub(crate) api_key: String,
-}
-
-impl std::fmt::Debug for ReplayConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReplayConfig")
             .field("api_key", &"<redacted>")
             .finish()
     }
