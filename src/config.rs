@@ -7,19 +7,19 @@ use serde::Deserialize;
 
 /// TLS certificate configuration for mTLS client authentication.
 #[derive(Clone, Deserialize)]
-pub struct TlsConfig {
+pub(crate) struct TlsConfig {
     /// Whether mTLS is enabled (`NOX_REPLAYER_NATS__TLS__ENABLED`, default `true`).
     /// Set to `false` for dev / Tenderly VM to connect to a plain NATS server.
-    pub enabled: bool,
+    pub(crate) enabled: bool,
     /// CA certificate PEM content (`NOX_REPLAYER_NATS__TLS__CA`). Required when `enabled`.
     #[serde(default)]
-    pub ca: String,
+    pub(crate) ca: String,
     /// Client certificate PEM content (`NOX_REPLAYER_NATS__TLS__CERT`). Required when `enabled`.
     #[serde(default)]
-    pub cert: String,
+    pub(crate) cert: String,
     /// Client private key PEM content (`NOX_REPLAYER_NATS__TLS__KEY`). Required when `enabled`.
     #[serde(default)]
-    pub key: String,
+    pub(crate) key: String,
 }
 
 impl std::fmt::Debug for TlsConfig {
@@ -33,23 +33,20 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct Config {
-    pub chain: ChainConfig,
-    pub nats: NatsConfig,
-    pub server: ServerConfig,
-    pub replay: ReplayConfig,
+#[derive(Deserialize)]
+pub(crate) struct Config {
+    pub(crate) chain: ChainConfig,
+    pub(crate) nats: NatsConfig,
+    pub(crate) server: ServerConfig,
+    pub(crate) api_key: String,
 }
 
-/// Configuration for the on-demand `POST /replay` endpoint.
-#[derive(Clone, Deserialize)]
-pub struct ReplayConfig {
-    pub api_key: String,
-}
-
-impl std::fmt::Debug for ReplayConfig {
+impl std::fmt::Debug for Config {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReplayConfig")
+        f.debug_struct("Config")
+            .field("chain", &self.chain)
+            .field("nats", &self.nats)
+            .field("server", &self.server)
             .field("api_key", &"<redacted>")
             .finish()
     }
@@ -57,33 +54,33 @@ impl std::fmt::Debug for ReplayConfig {
 
 /// Chain/RPC configuration
 #[derive(Debug, Clone, Deserialize)]
-pub struct ChainConfig {
+pub(crate) struct ChainConfig {
     /// Chain ID (default: 421614 for Arbitrum Sepolia)
-    pub chain_id: u32,
+    pub(crate) chain_id: u32,
 
     /// RPC endpoint URL
-    pub rpc_endpoint: String,
+    pub(crate) rpc_endpoint: String,
 
     /// Contract address to monitor
-    pub contract_address: Address,
+    pub(crate) contract_address: Address,
 
     /// Number of blocks to fetch per batch (default: 50)
-    pub batch_size: u64,
+    pub(crate) batch_size: u64,
 
     /// Delay between retries (default: "250ms")
     #[serde(with = "humantime_serde")]
-    pub retry_delay: Duration,
+    pub(crate) retry_delay: Duration,
 
     /// Bounded retry attempts for a failing batch read
-    pub max_retries: u32,
+    pub(crate) max_retries: u32,
 
     /// TCP connection timeout. Default `10s`.
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
-    pub connect_timeout: Duration,
+    pub(crate) connect_timeout: Duration,
 
     /// Total per-request RPC timeout (connect + read). Default `30s`.
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
-    pub rpc_timeout: Duration,
+    pub(crate) rpc_timeout: Duration,
 }
 
 fn default_connect_timeout() -> Duration {
@@ -96,54 +93,54 @@ fn default_rpc_timeout() -> Duration {
 
 /// NATS JetStream configuration
 #[derive(Debug, Clone, Deserialize)]
-pub struct NatsConfig {
+pub(crate) struct NatsConfig {
     /// NATS server URLs (`NOX_REPLAYER_NATS__URLS`, comma-separated)
-    pub urls: Vec<String>,
+    pub(crate) urls: Vec<String>,
 
     /// TLS client certificate configuration
-    pub tls: TlsConfig,
+    pub(crate) tls: TlsConfig,
 
     /// JetStream stream replica count (`NOX_REPLAYER_NATS__NUM_REPLICAS`, default `3`)
-    pub num_replicas: u32,
+    pub(crate) num_replicas: u32,
 
     /// JetStream stream name
-    pub stream_name: String,
+    pub(crate) stream_name: String,
 
     /// Subject prefix for events
-    pub subject: String,
+    pub(crate) subject: String,
 
     /// Stream retention (default: "1d")
     #[serde(with = "humantime_serde")]
-    pub retention: Duration,
+    pub(crate) retention: Duration,
 
     /// Duplicate detection window (default: "10m")
     #[serde(with = "humantime_serde")]
-    pub duplicate_window: Duration,
+    pub(crate) duplicate_window: Duration,
 
     /// Initial reconnect delay (default: 1s)
     #[serde(with = "humantime_serde")]
-    pub reconnect_delay: Duration,
+    pub(crate) reconnect_delay: Duration,
 
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
-    pub max_reconnect_delay: Duration,
+    pub(crate) max_reconnect_delay: Duration,
 
     /// Delay between publish retries (default: "250ms")
     #[serde(with = "humantime_serde")]
-    pub publish_retry_delay: Duration,
+    pub(crate) publish_retry_delay: Duration,
 
     /// Bounded retry attempts for a transient publish failure
-    pub publish_max_retries: u32,
+    pub(crate) publish_max_retries: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct ServerConfig {
-    pub host: String,
-    pub port: u16,
+pub(crate) struct ServerConfig {
+    pub(crate) host: String,
+    pub(crate) port: u16,
 }
 
 impl Config {
-    pub fn load() -> Result<Self, ConfigError> {
+    pub(crate) fn load() -> Result<Self, ConfigError> {
         let config = ConfigBuilder::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", "8080")?
@@ -198,7 +195,7 @@ impl Config {
     }
 
     /// Returns the `host:port` string used to bind the HTTP listener.
-    pub fn binding_address(&self) -> String {
+    pub(crate) fn binding_address(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
     }
 }
