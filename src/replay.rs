@@ -102,7 +102,6 @@ pub(crate) struct ReplayAccepted {
 /// On panic the permit still drops (409 recovers) but the slot is left in its
 /// last `Running` state until the next job overwrites it — a panic here is a
 /// bug, not a modeled state.
-#[allow(dead_code)]
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
