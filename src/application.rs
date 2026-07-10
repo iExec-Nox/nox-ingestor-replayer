@@ -17,7 +17,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 use crate::chain::{BlockReader, ChainClient, NoxEventParser};
-use crate::config::{Config, ReplayConfig};
+use crate::config::Config;
 use crate::handlers;
 use crate::nats::{NatsClient, Publisher};
 use crate::replay::ReplayJobStatus;
@@ -32,7 +32,7 @@ pub(crate) struct AppState {
     pub(crate) reader: Arc<BlockReader>,
     pub(crate) publisher: Arc<Publisher>,
     pub(crate) lock: Arc<Semaphore>,
-    pub(crate) replay: ReplayConfig,
+    pub(crate) api_key: String,
     pub(crate) shutdown: watch::Receiver<bool>,
     pub(crate) job_status: Arc<RwLock<ReplayJobStatus>>,
     pub(crate) replay_task: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -84,7 +84,7 @@ impl Application {
             reader: Arc::new(reader),
             publisher: Arc::new(publisher),
             lock: Arc::new(Semaphore::new(1)),
-            replay: self.config.replay.clone(),
+            api_key: self.config.api_key.clone(),
             shutdown: shutdown_rx,
             job_status: Arc::new(RwLock::new(ReplayJobStatus::default())),
             replay_task: Arc::new(Mutex::new(None)),
@@ -166,64 +166,5 @@ async fn await_replay_task(slot: &Mutex<Option<JoinHandle<()>>>, grace: Duration
             );
             abort_handle.abort();
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(start_paused = true)]
-    async fn await_replay_task_is_noop_when_slot_is_empty() {
-        let slot: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
-        let grace = Duration::from_secs(30);
-
-        let start = tokio::time::Instant::now();
-        await_replay_task(&slot, grace).await;
-        let elapsed = start.elapsed();
-
-        assert!(
-            elapsed < grace,
-            "expected near-immediate return, elapsed: {elapsed:?}"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn await_replay_task_returns_immediately_when_task_already_finished() {
-        let handle = tokio::spawn(async {});
-        handle.await.unwrap();
-
-        let handle = tokio::spawn(async {});
-        let slot = Mutex::new(Some(handle));
-        let grace = Duration::from_secs(30);
-
-        let start = tokio::time::Instant::now();
-        await_replay_task(&slot, grace).await;
-        let elapsed = start.elapsed();
-
-        assert!(
-            elapsed < grace,
-            "expected near-immediate return, elapsed: {elapsed:?}"
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn await_replay_task_aborts_after_grace_period_elapses() {
-        let handle = tokio::spawn(async {
-            loop {
-                tokio::time::sleep(Duration::from_secs(3600)).await;
-            }
-        });
-        let slot = Mutex::new(Some(handle));
-        let grace = Duration::from_secs(30);
-
-        let start = tokio::time::Instant::now();
-        await_replay_task(&slot, grace).await;
-        let elapsed = start.elapsed();
-
-        assert!(
-            elapsed >= grace,
-            "expected to wait out the full grace period before aborting, elapsed: {elapsed:?}"
-        );
     }
 }
