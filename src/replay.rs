@@ -22,10 +22,11 @@ pub(crate) enum JobState {
     Stopped,
 }
 
-/// Why a replay job reached its terminal state. `None` only while the job is
-/// idle or running; `Some(_)` for every terminal state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// Why a replay job is no longer running. Defaults to `Completed`, the
+/// non-failure case, and is overwritten with the specific cause on failure.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum StopReason {
+    #[default]
     Completed,
     ShutdownSignal,
     RpcError,
@@ -42,7 +43,7 @@ pub(crate) struct ReplayJobStatus {
     pub(crate) progress: ReplayProgress,
     pub(crate) started_at: Option<DateTime<Utc>>,
     pub(crate) finished_at: Option<DateTime<Utc>>,
-    pub(crate) stop_reason: Option<StopReason>,
+    pub(crate) stop_reason: StopReason,
 }
 
 /// Mutable progress counters accumulated while a replay job runs.
@@ -118,12 +119,12 @@ pub(crate) async fn run_replay_job(
     };
     let mut current = from_block;
     let mut resume_from = from_block;
-    let mut stop_reason: Option<StopReason> = None;
+    let mut stop_reason = StopReason::Completed;
 
     'outer: while current <= to_block {
         if *shutdown.borrow() {
             warn!(from = current, "replay stopped: shutdown signal received");
-            stop_reason = Some(StopReason::ShutdownSignal);
+            stop_reason = StopReason::ShutdownSignal;
             resume_from = current;
             break;
         }
@@ -136,7 +137,7 @@ pub(crate) async fn run_replay_job(
             Ok(batch) => batch,
             Err(e) => {
                 warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
-                stop_reason = Some(StopReason::RpcError);
+                stop_reason = StopReason::RpcError;
                 resume_from = current;
                 break;
             }
@@ -148,7 +149,7 @@ pub(crate) async fn run_replay_job(
                     block = tx.block_number,
                     "replay stopped: shutdown signal received"
                 );
-                stop_reason = Some(StopReason::ShutdownSignal);
+                stop_reason = StopReason::ShutdownSignal;
                 resume_from = tx.block_number;
                 break 'outer;
             }
@@ -166,7 +167,7 @@ pub(crate) async fn run_replay_job(
                 }
                 Err(e) => {
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
-                    stop_reason = Some(StopReason::NatsError);
+                    stop_reason = StopReason::NatsError;
                     // Resume from the failed block; already-acked blocks are not re-read.
                     resume_from = tx.block_number;
                     break 'outer;
@@ -187,17 +188,13 @@ pub(crate) async fn run_replay_job(
     let mut slot = status.write().await;
     progress.apply_to(&mut slot);
     slot.finished_at = Some(Utc::now());
-    match stop_reason {
-        None => {
-            slot.state = JobState::Completed;
-            slot.stop_reason = Some(StopReason::Completed);
-            slot.progress.current_block = to_block.saturating_add(1);
-        }
-        Some(reason) => {
-            slot.state = JobState::Stopped;
-            slot.stop_reason = Some(reason);
-            slot.progress.current_block = resume_from;
-        }
+    slot.stop_reason = stop_reason;
+    if stop_reason == StopReason::Completed {
+        slot.state = JobState::Completed;
+        slot.progress.current_block = to_block.saturating_add(1);
+    } else {
+        slot.state = JobState::Stopped;
+        slot.progress.current_block = resume_from;
     }
 
     drop(slot);
