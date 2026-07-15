@@ -186,7 +186,6 @@ impl TransactionMessage {
     }
 }
 
-#[allow(dead_code)] // will be used in a later PR
 pub(crate) fn log_event(event: &TransactionEvent) {
     match &event.operator {
         Operator::Add(op) => {

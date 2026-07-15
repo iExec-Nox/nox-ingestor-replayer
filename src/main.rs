@@ -11,6 +11,7 @@ pub mod error;
 pub mod events;
 pub mod handlers;
 pub mod nats;
+pub mod replay;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
