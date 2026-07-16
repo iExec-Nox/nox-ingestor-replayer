@@ -7,14 +7,13 @@ use axum::{
     response::IntoResponse,
 };
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use chrono::Utc;
 use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
-use crate::replay::{ReplayJobStatus, run_replay_job};
+use crate::replay::{ReplayAccepted, ReplayJobStatus, ReplayRequest, run_replay_job};
 
 /// Health check endpoint handler.
 ///
@@ -53,20 +52,6 @@ pub(crate) async fn not_found(uri: Uri) -> impl IntoResponse {
 /// `GET /` — returns service name and current UTC timestamp.
 pub(crate) async fn root() -> Json<Value> {
     Json(json!({ "service": "Ingestor Replayer", "timestamp": Utc::now().to_rfc3339() }))
-}
-
-/// Request body for `POST /replay`: the inclusive block range to replay.
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct ReplayRequest {
-    pub(crate) from_block: u64,
-    pub(crate) to_block: u64,
-}
-
-/// `202` body for `POST /replay`: the replay has been accepted and is running in the background.
-#[derive(Debug, Serialize)]
-pub(crate) struct ReplayAccepted {
-    pub(crate) request: ReplayRequest,
-    pub(crate) accepted_at: DateTime<Utc>,
 }
 
 /// Validate that `from <= to`.
