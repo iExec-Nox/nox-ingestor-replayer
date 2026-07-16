@@ -80,6 +80,7 @@ Configuration is loaded from environment variables with the `NOX_REPLAYER_` pref
 | `NOX_REPLAYER_CHAIN__BATCH_SIZE` | Blocks fetched per RPC call | No | `50` |
 | `NOX_REPLAYER_CHAIN__POLL_DELAY` | Interval between block polls | No | `500ms` |
 | `NOX_REPLAYER_CHAIN__RETRY_DELAY` | Delay between retries on RPC error | No | `250ms` |
+| `NOX_REPLAYER_API_KEY` | API key required in the `X-Api-Key` header to authorize `POST /replay`. An empty value always rejects the request (no way to disable auth). | **Yes** | _(none)_ |
 | `NOX_REPLAYER_APP__STATE_PATH` | Path to the cursor state file | No | `nox_replayer_state_421614.json` |
 | `NOX_REPLAYER_APP__FLUSH_INTERVAL` | How often the cursor is flushed to disk | No | `5s` |
 | `NOX_REPLAYER_NATS__URLS` | NATS server URLs, comma-separated. One URL = single-node; several = cluster with transparent failover. Use the `tls://` scheme for immediate-TLS servers, `nats://` for STARTTLS / plaintext. | No | `nats://localhost:4221,nats://localhost:4222,nats://localhost:4223` |

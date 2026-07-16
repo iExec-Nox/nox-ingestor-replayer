@@ -42,7 +42,7 @@ pub struct BlockReader {
 
 impl BlockReader {
     /// Create a new block reader
-    pub fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
+    pub(crate) fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
         Self {
             client,
             parser,
@@ -54,12 +54,16 @@ impl BlockReader {
     }
 
     /// Fetch the latest block known to the chain
-    pub async fn latest_block(&self) -> Result<u64, RpcError> {
+    pub(crate) async fn latest_block(&self) -> Result<u64, RpcError> {
         self.client.get_latest_block().await
     }
 
     /// Read a batch with bounded retries
-    pub async fn read_batch_bounded(&self, from: u64, to: u64) -> Result<BatchResult, RpcError> {
+    pub(crate) async fn read_batch_bounded(
+        &self,
+        from: u64,
+        to: u64,
+    ) -> Result<BatchResult, RpcError> {
         let mut attempt = 0u32;
         loop {
             match self.read_batch(from, to).await {
@@ -120,7 +124,7 @@ impl BlockReader {
     }
 
     /// Returns the configured batch size
-    pub fn batch_size(&self) -> u64 {
+    pub(crate) fn batch_size(&self) -> u64 {
         self.batch_size
     }
 

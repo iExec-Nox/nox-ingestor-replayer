@@ -36,12 +36,22 @@ pub struct NatsClient {
 
 impl NatsClient {
     /// Connect to NATS server
-    pub async fn connect(config: &NatsConfig) -> Result<Self, NatsError> {
+    pub(crate) async fn connect(config: &NatsConfig) -> Result<Self, NatsError> {
         let (state_tx, state_rx) = watch::channel(ConnectionState::Disconnected);
 
         let state_tx_clone = state_tx.clone();
+        let reconnect_delay = config.reconnect_delay;
+        let max_reconnect_delay = config.max_reconnect_delay;
 
         let mut options = ConnectOptions::new()
+            .reconnect_delay_callback(move |attempts| {
+                let exponent = u32::try_from(attempts).unwrap_or(u32::MAX).min(32);
+                let multiplier = 1u32.checked_shl(exponent).unwrap_or(u32::MAX);
+                reconnect_delay
+                    .checked_mul(multiplier)
+                    .unwrap_or(max_reconnect_delay)
+                    .min(max_reconnect_delay)
+            })
             .event_callback(move |event| {
                 let state_tx = state_tx_clone.clone();
                 async move {
@@ -95,7 +105,7 @@ impl NatsClient {
     }
 
     /// Setup JetStream stream
-    pub async fn setup_stream(&self, config: &NatsConfig) -> Result<(), NatsError> {
+    pub(crate) async fn setup_stream(&self, config: &NatsConfig) -> Result<(), NatsError> {
         info!(stream = config.stream_name, "Setting up JetStream stream");
 
         let configured = config.num_replicas as usize;
