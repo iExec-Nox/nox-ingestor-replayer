@@ -196,17 +196,23 @@ pub(crate) async fn replay_status(
 pub(crate) async fn replay_status_legacy(
     State(state): State<AppState>,
 ) -> Result<Json<ReplayJobStatus>, (StatusCode, Json<Value>)> {
-    let chain_id = state.registry.pipelines.keys().min().copied().ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": {
-                    "kind": "chain_not_configured",
-                    "message": "no chains configured",
-                    "retryable": false,
-                }
-            })),
-        )
-    })?;
+    let chain_id = state
+        .registry
+        .pipelines
+        .keys()
+        .min()
+        .copied()
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": {
+                        "kind": "chain_not_configured",
+                        "message": "no chains configured",
+                        "retryable": false,
+                    }
+                })),
+            )
+        })?;
     replay_status(State(state), Path(chain_id)).await
 }
