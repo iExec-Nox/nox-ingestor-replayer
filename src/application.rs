@@ -149,7 +149,8 @@ impl Application {
 /// Await the in-flight replay task (if any) with a bounded grace period,
 /// aborting it if it hasn't finished by then. No-op if no task is stored.
 async fn await_replay_task(slot: &Mutex<Option<JoinHandle<()>>>, grace: Duration) {
-    let handle = slot.lock().unwrap().take();
+    // Poisoning is all but impossible: the guard is never held across an `.await` and no holder panics.
+    let handle = slot.lock().expect("replay_task mutex poisoned").take();
     let Some(handle) = handle else {
         return;
     };
