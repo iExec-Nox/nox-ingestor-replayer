@@ -22,10 +22,11 @@ pub(crate) enum JobState {
     Stopped,
 }
 
-/// Why a replay job stopped before finishing its range. Absent (`None`) while
-/// the job is idle, running, or completed cleanly; `Some` only on an abnormal stop.
+/// Why a replay job reached its terminal state. `None` only while the job is
+/// idle or running; `Some(_)` for every terminal state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) enum StopReason {
+    Completed,
     ShutdownSignal,
     RpcError,
     NatsError,
@@ -181,14 +182,15 @@ pub(crate) async fn run_replay_job(
     let mut slot = status.write().await;
     progress.apply_to(&mut slot);
     slot.finished_at = Some(Utc::now());
-    slot.stop_reason = stop_reason;
     match stop_reason {
         None => {
             slot.state = JobState::Completed;
+            slot.stop_reason = Some(StopReason::Completed);
             slot.progress.current_block = to_block.saturating_add(1);
         }
-        Some(_) => {
+        Some(reason) => {
             slot.state = JobState::Stopped;
+            slot.stop_reason = Some(reason);
             slot.progress.current_block = resume_from;
         }
     }
