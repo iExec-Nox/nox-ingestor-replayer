@@ -79,6 +79,8 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
         .get("X-Api-Key")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
+    // Length is compared in the clear before `ct_eq`: a deliberate, accepted
+    // leak (internal fixed-length key, so its length carries negligible info).
     if provided.len() == expected.len() && provided.as_bytes().ct_eq(expected.as_bytes()).into() {
         Ok(())
     } else {
@@ -130,7 +132,11 @@ pub(crate) async fn replay(
         req.from_block,
         req.to_block,
     ));
-    *state.replay_task.lock().unwrap() = Some(handle);
+    // Poisoning is all but impossible: the guard is never held across an `.await` and no holder panics.
+    *state
+        .replay_task
+        .lock()
+        .expect("replay_task mutex poisoned") = Some(handle);
 
     Ok((
         StatusCode::ACCEPTED,
@@ -142,9 +148,6 @@ pub(crate) async fn replay(
 }
 
 /// `GET /replay/status` returns the current (or most recent) replay job status.
-pub(crate) async fn replay_status(
-    State(state): State<AppState>,
-) -> Result<Json<ReplayJobStatus>, ReplayError> {
-    let status = state.job_status.read().await.clone();
-    Ok(Json(status))
+pub(crate) async fn replay_status(State(state): State<AppState>) -> Json<ReplayJobStatus> {
+    Json(state.job_status.read().await.clone())
 }
