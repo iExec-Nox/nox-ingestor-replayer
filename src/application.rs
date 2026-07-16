@@ -76,7 +76,14 @@ impl Application {
         ));
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status", "/replay/{chain_id}"])
+            .with_allow_patterns(&[
+                "/",
+                "/health",
+                "/metrics",
+                "/replay",
+                "/replay/status",
+                "/replay/{chain_id}",
+            ])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
