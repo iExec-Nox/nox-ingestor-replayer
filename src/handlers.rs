@@ -148,7 +148,6 @@ pub(crate) async fn replay(
         state.shutdown.clone(),
         (chain_permit, global_permit),
         pipeline.job_status.clone(),
-        req.chain_id,
         req.from_block,
         req.to_block,
     ));
