@@ -2,7 +2,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Result;
-use axum::{Router, extract::FromRef, routing::get};
+use axum::{
+    Router,
+    extract::FromRef,
+    routing::{get, post},
+};
 use axum_prometheus::{
     Handle, MakeDefaultHandle, PrometheusMetricLayerBuilder,
     metrics_exporter_prometheus::PrometheusHandle,
@@ -91,7 +95,7 @@ impl Application {
             .route("/", get(handlers::root))
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
-            .route("/replay", axum::routing::post(handlers::replay))
+            .route("/replay", post(handlers::replay))
             .route("/replay/status", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
