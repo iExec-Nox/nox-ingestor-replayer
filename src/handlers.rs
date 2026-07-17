@@ -107,7 +107,7 @@ pub(crate) async fn replay(
     Json(body): Json<ReplayBody>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
     check_api_key(&headers, &state.replay.api_key)?;
-    let chain_id = query.chain_id.ok_or(ReplayError::MissingChainId)?;
+    let chain_id: u32 = query.parse_chain_id()?.ok_or(ReplayError::MissingChainId)?;
     validate_span(body.from_block, body.to_block)?;
 
     let req = ReplayRequest {
@@ -136,11 +136,12 @@ pub(crate) async fn replay(
         .clone()
         .try_acquire_owned()
         .map_err(|_| ReplayError::AtCapacity {
-            max: state.replay.max_concurrent_chains,
+            max: state.replay.max_concurrent_replay_jobs,
         })?;
 
     if !pipeline.publisher.is_connected() {
         return Err(ReplayError::Nats {
+            chain_id: req.chain_id,
             source: NatsError::Unavailable,
         });
     }
@@ -148,7 +149,10 @@ pub(crate) async fn replay(
         .reader
         .latest_block()
         .await
-        .map_err(|source| ReplayError::Rpc { source })?;
+        .map_err(|source| ReplayError::Rpc {
+            chain_id: req.chain_id,
+            source,
+        })?;
     check_within_head(req.range.to_block, latest)?;
 
     *pipeline.job_status.write().await =
@@ -179,23 +183,20 @@ pub(crate) async fn replay(
 }
 
 /// `GET /replay/status` returns the current (or most recent) replay job
-/// status. With `?chain_id=<id>`, returns just that chain's status
-/// (deliberately NOT a `ReplayError` as an unknown chain here is a plain 404,
-/// not a request outcome we want folded into replay request metrics).
+/// status. With `?chain_id=<id>`, returns just that chain's status; an unknown
+/// chain yields `ReplayError::ChainNotConfigured` (400).
 /// Without it, returns every configured chain's status as a JSON object
 /// keyed by chain_id.
 pub(crate) async fn replay_status(
     State(state): State<AppState>,
     Query(query): Query<ChainQuery>,
-) -> Result<Json<BTreeMap<u32, ReplayJobStatus>>, (StatusCode, Json<Value>)> {
-    match query.chain_id {
+) -> Result<Json<BTreeMap<u32, ReplayJobStatus>>, ReplayError> {
+    match query.parse_chain_id()? {
         Some(chain_id) => {
-            let pipeline = state.registry.get(chain_id).ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ReplayError::ChainNotConfigured { chain_id }.body()),
-                )
-            })?;
+            let pipeline = state
+                .registry
+                .get(chain_id)
+                .ok_or(ReplayError::ChainNotConfigured { chain_id })?;
             let status = pipeline.job_status.read().await.clone();
             Ok(Json(BTreeMap::from([(chain_id, status)])))
         }
