@@ -150,6 +150,43 @@ Prometheus metrics endpoint for observability.
 
 **Response:** Prometheus text format metrics.
 
+In addition to the per-route HTTP request metrics emitted automatically by the
+middleware layer (`axum_http_requests_*`), the service exports the following
+application metrics. Dots in the source names render as underscores in the
+Prometheus text format (e.g. `nox_replayer_nats_connection_state`). All
+per-chain counters and gauges are pre-registered at startup, so each series is
+present (at `0`) before its first event.
+
+**NATS**
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `nox_replayer_nats_connection_state` | gauge | Current connection state: `1` connected, `0` disconnected. |
+| `nox_replayer_nats_reconnects_total` | counter | Reconnections after the initial connect (the first connect is not counted). |
+| `nox_replayer_nats_publish_retries_total` | counter | Transient publish failures that were retried. |
+
+**Replay** — all labeled by `chain_id` unless noted.
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `nox_replayer_replay_requests_total` | counter | Replay API responses by `outcome` label: `ok` on accept, otherwise the error kind (`unauthorized`, `missing_chain_id`, `invalid_chain_id`, `invalid_range`, `range_beyond_head`, `chain_busy`, `chain_not_configured`, `at_capacity`, `rpc_error`, `nats_error`). Not labeled by `chain_id`. |
+| `nox_replayer_replay_jobs_in_flight` | gauge | Replay jobs currently running. |
+| `nox_replayer_replay_blocks_read_total` | counter | Blocks read from RPC. |
+| `nox_replayer_replay_transactions_published_total` | counter | Transactions published to NATS. |
+| `nox_replayer_replay_events_total` | counter | Events published to NATS. |
+| `nox_replayer_replay_duplicates_total` | counter | Publishes JetStream deduplicated (already stored). |
+| `nox_replayer_replay_rpc_errors_total` | counter | Batch reads that failed against the RPC endpoint. |
+| `nox_replayer_replay_publish_errors_total` | counter | Publishes that failed after exhausting retries. |
+| `nox_replayer_replay_last_published_block` | gauge | Block number of the most recent successful publish. |
+| `nox_replayer_replay_rpc_read_seconds` | histogram | Latency of each bounded batch read from RPC. |
+| `nox_replayer_replay_job_duration_seconds` | histogram | Wall-clock duration of a replay job, labeled by `chain_id` and terminal `result` (`completed`, `shutdown`, `rpc_error`, `nats_error`). |
+
+**Build**
+
+| Metric | Type | Description |
+| --- | --- | --- |
+| `nox_replayer_build_info` | gauge | Always `1`, labeled by `version` (the crate version) for dashboard/version pinning. |
+
 ---
 
 ## NATS Message Format
