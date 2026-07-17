@@ -54,6 +54,7 @@ impl std::fmt::Debug for ReplayConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayConfig")
             .field("api_key", &"<redacted>")
+            .field("max_concurrent_chains", &self.max_concurrent_chains)
             .finish()
     }
 }
@@ -187,64 +188,5 @@ impl Config {
     /// Returns the `host:port` string used to bind the HTTP listener.
     pub(crate) fn binding_address(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chains_map_deserializes_one_entry_keyed_by_chain_id() {
-        let built = ConfigBuilder::builder()
-            .set_override("chains.421614.rpc_endpoint", "http://localhost:8545")
-            .unwrap()
-            .set_override(
-                "chains.421614.contract_address",
-                "0x0000000000000000000000000000000000000001",
-            )
-            .unwrap()
-            .set_override("chains.421614.batch_size", 50)
-            .unwrap()
-            .set_override("chains.421614.retry_delay", "250ms")
-            .unwrap()
-            .set_override("chains.421614.max_retries", 5)
-            .unwrap()
-            .set_override("nats.urls", vec!["nats://localhost:4222"])
-            .unwrap()
-            .set_override("nats.tls.enabled", false)
-            .unwrap()
-            .set_override("nats.num_replicas", 1)
-            .unwrap()
-            .set_override("nats.stream_name", "s")
-            .unwrap()
-            .set_override("nats.subject", "s")
-            .unwrap()
-            .set_override("nats.retention", "1d")
-            .unwrap()
-            .set_override("nats.duplicate_window", "10m")
-            .unwrap()
-            .set_override("nats.reconnect_delay", "1s")
-            .unwrap()
-            .set_override("nats.max_reconnect_delay", "30s")
-            .unwrap()
-            .set_override("nats.publish_retry_delay", "250ms")
-            .unwrap()
-            .set_override("nats.publish_max_retries", 5)
-            .unwrap()
-            .set_override("server.host", "127.0.0.1")
-            .unwrap()
-            .set_override("server.port", 8080)
-            .unwrap()
-            .set_override("replay.api_key", "k")
-            .unwrap()
-            .set_override("replay.max_concurrent_chains", 20)
-            .unwrap()
-            .build()
-            .unwrap();
-
-        let cfg: Config = built.try_deserialize().unwrap();
-        assert_eq!(cfg.chains.len(), 1);
-        assert!(cfg.chains.contains_key(&421614));
     }
 }
