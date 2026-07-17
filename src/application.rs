@@ -76,14 +76,7 @@ impl Application {
         ));
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&[
-                "/",
-                "/health",
-                "/metrics",
-                "/replay",
-                "/replay/status",
-                "/replay/{chain_id}",
-            ])
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
@@ -101,8 +94,7 @@ impl Application {
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
             .route("/replay", post(handlers::replay))
-            .route("/replay/status", get(handlers::replay_status_all))
-            .route("/replay/{chain_id}", get(handlers::replay_status))
+            .route("/replay/status", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
             .with_state(app_state);
