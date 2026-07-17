@@ -9,6 +9,7 @@ use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
 use tracing::warn;
 
 use crate::chain::BlockReader;
+use crate::error::ReplayError;
 use crate::events::log_event;
 use crate::nats::Publisher;
 
@@ -84,7 +85,23 @@ impl ReplayJobStatus {
 /// `GET /replay/status` treats `None` as "every configured chain".
 #[derive(Debug, Deserialize)]
 pub(crate) struct ChainQuery {
-    pub(crate) chain_id: Option<u32>,
+    pub(crate) chain_id: Option<String>,
+}
+
+impl ChainQuery {
+    /// Parse the raw `chain_id` into a numeric id. Returns `Ok(None)` when the
+    /// parameter is absent, and `ReplayError::InvalidChainId` for a present but
+    /// non-numeric value.
+    pub(crate) fn parse_chain_id(&self) -> Result<Option<u32>, ReplayError> {
+        self.chain_id
+            .as_deref()
+            .map(|v| {
+                v.parse::<u32>().map_err(|_| ReplayError::InvalidChainId {
+                    value: v.to_string(),
+                })
+            })
+            .transpose()
+    }
 }
 
 /// JSON body for `POST /replay`: the inclusive block range to replay.
