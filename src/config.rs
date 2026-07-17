@@ -76,6 +76,7 @@ pub(crate) struct ReplayConfig {
     #[validate(length(min = 1))]
     pub(crate) api_key: String,
     /// Global cap on concurrently-running replay jobs across all chains (default: 20).
+    #[validate(range(min = 1))]
     pub(crate) max_concurrent_replay_jobs: usize,
 }
 
@@ -93,6 +94,7 @@ impl std::fmt::Debug for ReplayConfig {
 
 /// Chain/RPC configuration. The chain ID is the `chains` map key, not a field here.
 #[derive(Debug, Clone, Deserialize, Serialize, Validate)]
+#[validate(schema(function = "validate_chain_timeouts"))]
 pub(crate) struct ChainConfig {
     /// RPC endpoint URL
     #[validate(url)]
@@ -102,12 +104,14 @@ pub(crate) struct ChainConfig {
     #[validate(custom(function = "validate_non_zero_address"))]
     pub(crate) contract_address: Address,
 
-    /// Number of blocks to fetch per batch (default: 50)
-    #[validate(range(min = 1))]
+    /// Number of blocks to fetch per batch. Required per chain (no default).
+    /// Upper bound is provider-dependent (`eth_getLogs` range/result caps).
+    #[validate(range(min = 1, max = 10000))]
     pub(crate) batch_size: u64,
 
-    /// Delay between retries (default: "250ms")
+    /// Delay between retries. Required per chain (no default).
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) retry_delay: Duration,
 
     /// Bounded retry attempts for a failing batch read
@@ -116,10 +120,12 @@ pub(crate) struct ChainConfig {
 
     /// TCP connection timeout. Default `5s`.
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) connect_timeout: Duration,
 
     /// Total per-request RPC timeout (connect + read). Default `8s`.
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) rpc_timeout: Duration,
 }
 
@@ -135,6 +141,37 @@ fn validate_non_zero_address(address: &Address) -> Result<(), ValidationError> {
     if *address == Address::ZERO {
         return Err(ValidationError::new("address_is_zero")
             .with_message(Cow::from("contract address must not be the zero address")));
+    }
+    Ok(())
+}
+
+fn validate_duration_non_zero(value: &Duration) -> Result<(), ValidationError> {
+    if *value == Duration::ZERO {
+        return Err(ValidationError::new("duration_zero")
+            .with_message(Cow::from("duration must be greater than zero")));
+    }
+    Ok(())
+}
+
+fn validate_chain_timeouts(cfg: &ChainConfig) -> Result<(), ValidationError> {
+    if cfg.connect_timeout > cfg.rpc_timeout {
+        return Err(ValidationError::new("connect_timeout_gt_rpc_timeout")
+            .with_message(Cow::from("connect_timeout must not exceed rpc_timeout")));
+    }
+    Ok(())
+}
+
+fn validate_nats_delays(cfg: &NatsConfig) -> Result<(), ValidationError> {
+    if cfg.reconnect_delay > cfg.max_reconnect_delay {
+        return Err(
+            ValidationError::new("reconnect_delay_gt_max").with_message(Cow::from(
+                "reconnect_delay must not exceed max_reconnect_delay",
+            )),
+        );
+    }
+    if cfg.duplicate_window > cfg.retention {
+        return Err(ValidationError::new("duplicate_window_gt_retention")
+            .with_message(Cow::from("duplicate_window must not exceed retention")));
     }
     Ok(())
 }
@@ -156,6 +193,7 @@ fn validate_nats_urls(urls: &Vec<String>) -> Result<(), ValidationError> {
 
 /// NATS JetStream configuration
 #[derive(Debug, Clone, Deserialize, Validate)]
+#[validate(schema(function = "validate_nats_delays"))]
 pub(crate) struct NatsConfig {
     /// NATS server URLs (`NOX_REPLAYER_NATS__URLS`, comma-separated)
     #[validate(custom(function = "validate_nats_urls"))]
@@ -166,7 +204,7 @@ pub(crate) struct NatsConfig {
     pub(crate) tls: TlsConfig,
 
     /// JetStream stream replica count (`NOX_REPLAYER_NATS__NUM_REPLICAS`, default `3`)
-    #[validate(range(min = 1))]
+    #[validate(range(min = 1, max = 5))]
     pub(crate) num_replicas: u32,
 
     /// JetStream stream name
@@ -179,25 +217,31 @@ pub(crate) struct NatsConfig {
 
     /// Stream retention (default: "1d")
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) retention: Duration,
 
     /// Duplicate detection window (default: "10m")
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) duplicate_window: Duration,
 
     /// Initial reconnect delay (default: 1s)
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) reconnect_delay: Duration,
 
     /// Max reconnect delay (default: 30s)
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) max_reconnect_delay: Duration,
 
     /// Delay between publish retries (default: "250ms")
     #[serde(with = "humantime_serde")]
+    #[validate(custom(function = "validate_duration_non_zero"))]
     pub(crate) publish_retry_delay: Duration,
 
     /// Bounded retry attempts for a transient publish failure
+    #[validate(range(max = 10))]
     pub(crate) publish_max_retries: u32,
 }
 
@@ -205,6 +249,7 @@ pub(crate) struct NatsConfig {
 pub(crate) struct ServerConfig {
     #[validate(length(min = 1))]
     pub(crate) host: String,
+    #[validate(range(min = 1))]
     pub(crate) port: u16,
 }
 
