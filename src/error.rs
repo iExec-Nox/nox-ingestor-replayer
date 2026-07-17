@@ -86,6 +86,9 @@ pub enum ReplayError {
     #[error("Chain {chain_id} not configured")]
     ChainNotConfigured { chain_id: u32 },
 
+    #[error("Missing required query parameter: chain_id")]
+    MissingChainId,
+
     #[error("At capacity (max {max} concurrent chains)")]
     AtCapacity { max: usize },
 
@@ -111,6 +114,7 @@ impl ReplayError {
             }
             ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
             ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
+            ReplayError::MissingChainId => StatusCode::BAD_REQUEST,
             ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
