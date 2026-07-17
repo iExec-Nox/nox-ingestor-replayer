@@ -54,10 +54,13 @@ The Replayer is the on-chain observation layer of the Nox Protocol. It polls an 
 git clone https://github.com/iExec-Nox/nox-ingestor-replayer.git
 cd nox-ingestor-replayer
 
-# Set required environment variables
-export NOX_REPLAYER_CHAIN__CONTRACT_ADDRESS="0x..."
-export NOX_REPLAYER_CHAIN__RPC_ENDPOINT="https://..."
-export NOX_REPLAYER_CHAIN__INITIAL_BLOCK="12345678"
+# Configure one or more chains (keyed by numeric chain id) and the replay API key
+export NOX_REPLAYER_CHAINS__421614__RPC_ENDPOINT="https://arbitrum-sepolia-rpc.publicnode.com"
+export NOX_REPLAYER_CHAINS__421614__CONTRACT_ADDRESS="0x..."
+export NOX_REPLAYER_CHAINS__421614__BATCH_SIZE="50"
+export NOX_REPLAYER_CHAINS__421614__RETRY_DELAY="250ms"
+export NOX_REPLAYER_CHAINS__421614__MAX_RETRIES="5"
+export NOX_REPLAYER_REPLAY__API_KEY="<your-secret-key>"
 
 # Build and run
 cargo run --release
@@ -67,22 +70,21 @@ cargo run --release
 
 ## Environment Variables
 
-Configuration is loaded from environment variables with the `NOX_REPLAYER_` prefix. Nested properties use double underscore (`__`) as separator.
+Configuration is loaded from environment variables with the `NOX_REPLAYER_` prefix. Nested properties use double underscore (`__`) as separator. Chains are configured as a map keyed by numeric chain id under `NOX_REPLAYER_CHAINS__<chain_id>__*`; configure at least one chain. Replace `<chain_id>` below with a real chain id (e.g. `421614` for Arbitrum Sepolia).
 
 | Variable | Description | Required | Default |
 | -------- | ----------- | -------- | ------- |
 | `NOX_REPLAYER_SERVER__HOST` | HTTP server bind address | No | `127.0.0.1` |
 | `NOX_REPLAYER_SERVER__PORT` | HTTP server port | No | `8080` |
-| `NOX_REPLAYER_CHAIN__RPC_ENDPOINT` | Ethereum RPC URL | No | `https://arbitrum-sepolia-rpc.publicnode.com` |
-| `NOX_REPLAYER_CHAIN__CONTRACT_ADDRESS` | NoxCompute contract address to monitor | **Yes** | `0x000...000` |
-| `NOX_REPLAYER_CHAIN__CHAIN_ID` | Chain ID | No | `421614` (Arbitrum Sepolia) |
-| `NOX_REPLAYER_CHAIN__INITIAL_BLOCK` | Block to start from when no state file exists (`0` = refuse to start without state file) | No | `0` |
-| `NOX_REPLAYER_CHAIN__BATCH_SIZE` | Blocks fetched per RPC call | No | `50` |
-| `NOX_REPLAYER_CHAIN__POLL_DELAY` | Interval between block polls | No | `500ms` |
-| `NOX_REPLAYER_CHAIN__RETRY_DELAY` | Delay between retries on RPC error | No | `250ms` |
-| `NOX_REPLAYER_API_KEY` | API key required in the `X-Api-Key` header to authorize `POST /replay`. An empty value always rejects the request (no way to disable auth). | **Yes** | _(none)_ |
-| `NOX_REPLAYER_APP__STATE_PATH` | Path to the cursor state file | No | `nox_replayer_state_421614.json` |
-| `NOX_REPLAYER_APP__FLUSH_INTERVAL` | How often the cursor is flushed to disk | No | `5s` |
+| `NOX_REPLAYER_CHAINS__<chain_id>__RPC_ENDPOINT` | Ethereum RPC URL for this chain | **Yes** | _(none)_ |
+| `NOX_REPLAYER_CHAINS__<chain_id>__CONTRACT_ADDRESS` | NoxCompute contract address to monitor on this chain | **Yes** | _(none)_ |
+| `NOX_REPLAYER_CHAINS__<chain_id>__BATCH_SIZE` | Blocks fetched per RPC call | **Yes** | _(none)_ |
+| `NOX_REPLAYER_CHAINS__<chain_id>__RETRY_DELAY` | Delay between retries on a failed batch read | **Yes** | _(none)_ |
+| `NOX_REPLAYER_CHAINS__<chain_id>__MAX_RETRIES` | Retry attempts for a failing batch read | **Yes** | _(none)_ |
+| `NOX_REPLAYER_CHAINS__<chain_id>__CONNECT_TIMEOUT` | TCP connection timeout for RPC requests | No | `5s` |
+| `NOX_REPLAYER_CHAINS__<chain_id>__RPC_TIMEOUT` | Total per-request RPC timeout (connect + read) | No | `8s` |
+| `NOX_REPLAYER_REPLAY__API_KEY` | API key required in the `X-Api-Key` header to authorize `POST /replay`. An empty value always rejects the request (no way to disable auth). | **Yes** | _(none)_ |
+| `NOX_REPLAYER_REPLAY__MAX_CONCURRENT_REPLAY_JOBS` | Global cap on concurrently-running replay jobs across all chains | No | `20` |
 | `NOX_REPLAYER_NATS__URLS` | NATS server URLs, comma-separated. One URL = single-node; several = cluster with transparent failover. Use the `tls://` scheme for immediate-TLS servers, `nats://` for STARTTLS / plaintext. | No | `nats://localhost:4221,nats://localhost:4222,nats://localhost:4223` |
 | `NOX_REPLAYER_NATS__TLS__ENABLED` | Enable mTLS. When `false`, connects in plaintext and the CA/CERT/KEY vars are ignored. | No | `true` |
 | `NOX_REPLAYER_NATS__TLS__CA` | CA certificate **PEM content** (not a path). Required when TLS enabled. | When TLS on | _(empty)_ |
@@ -97,8 +99,6 @@ Configuration is loaded from environment variables with the `NOX_REPLAYER_` pref
 | `NOX_REPLAYER_NATS__MAX_RECONNECT_DELAY` | Maximum reconnect backoff | No | `30s` |
 | `NOX_REPLAYER_NATS__PUBLISH_RETRY_DELAY` | Delay between retries on a transient publish failure | No | `250ms` |
 | `NOX_REPLAYER_NATS__PUBLISH_MAX_RETRIES` | Max retry attempts for a transient publish failure before giving up | No | `5` |
-| `NOX_REPLAYER_NATS__WAIT_INTERVAL` | Poll interval while NATS is offline | No | `1s` |
-| `NOX_REPLAYER_NATS__BUFFER_CAPACITY` | In-memory message buffer size when NATS is offline | No | `1000` |
 
 For sensitive values, you can use the `_FILE` suffix to load from a file:
 

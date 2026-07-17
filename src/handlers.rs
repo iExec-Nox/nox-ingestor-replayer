@@ -2,18 +2,21 @@
 
 use axum::{
     Json,
-    extract::State,
+    extract::{Query, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
-use crate::replay::{ReplayAccepted, ReplayJobStatus, ReplayRequest, run_replay_job};
+use crate::replay::{
+    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
+};
 
 /// Health check endpoint handler.
 ///
@@ -88,52 +91,84 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
     }
 }
 
-/// `POST /replay` accepts a block range and replays it in a background task,
-/// publishing each transaction to NATS.
+/// `POST /replay?chain_id=<id>` accepts a chain ID (query parameter) and a
+/// block range (body) and replays it in a background task, publishing each
+/// transaction to NATS.
 ///
-/// Pre-flight failures (auth, validation, busy, NATS/RPC pre-checks) return an
-/// error status synchronously. Once accepted, the replay runs asynchronously;
-/// progress and the terminal outcome are available via `GET /replay/status`.
-/// Retries and resumes reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
+/// Pre-flight failures (auth, validation, unknown chain, busy, at-capacity,
+/// NATS/RPC pre-checks) return an error status synchronously. Once accepted,
+/// the replay runs asynchronously; progress and the terminal outcome are
+/// available via `GET /replay/status?chain_id=<id>`. Retries and resumes
+/// reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
 pub(crate) async fn replay(
     State(state): State<AppState>,
+    Query(query): Query<ChainQuery>,
     headers: axum::http::HeaderMap,
-    Json(req): Json<ReplayRequest>,
+    Json(body): Json<ReplayBody>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
-    check_api_key(&headers, &state.api_key)?;
-    validate_span(req.from_block, req.to_block)?;
+    check_api_key(&headers, &state.replay.api_key)?;
+    let chain_id: u32 = query.parse_chain_id()?.ok_or(ReplayError::MissingChainId)?;
+    validate_span(body.from_block, body.to_block)?;
 
-    let permit = state
-        .lock
+    let req = ReplayRequest {
+        chain_id,
+        range: body,
+    };
+
+    let pipeline = state
+        .registry
+        .get(req.chain_id)
+        .ok_or(ReplayError::ChainNotConfigured {
+            chain_id: req.chain_id,
+        })?;
+
+    let chain_permit =
+        pipeline
+            .lock
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ReplayError::ChainBusy {
+                chain_id: req.chain_id,
+            })?;
+    let global_permit = state
+        .registry
+        .global
         .clone()
         .try_acquire_owned()
-        .map_err(|_| ReplayError::ChainBusy)?;
+        .map_err(|_| ReplayError::AtCapacity {
+            max: state.replay.max_concurrent_replay_jobs,
+        })?;
 
-    if !state.publisher.is_connected() {
+    if !pipeline.publisher.is_connected() {
         return Err(ReplayError::Nats {
+            chain_id: req.chain_id,
             source: NatsError::Unavailable,
         });
     }
-    let latest = state
+    let latest = pipeline
         .reader
         .latest_block()
         .await
-        .map_err(|source| ReplayError::Rpc { source })?;
-    check_within_head(req.to_block, latest)?;
+        .map_err(|source| ReplayError::Rpc {
+            chain_id: req.chain_id,
+            source,
+        })?;
+    check_within_head(req.range.to_block, latest)?;
 
-    *state.job_status.write().await = ReplayJobStatus::running(req.from_block, req.to_block);
+    *pipeline.job_status.write().await =
+        ReplayJobStatus::running(req.range.from_block, req.range.to_block);
 
     let handle = tokio::spawn(run_replay_job(
-        state.reader.clone(),
-        state.publisher.clone(),
+        pipeline.reader.clone(),
+        pipeline.publisher.clone(),
         state.shutdown.clone(),
-        permit,
-        state.job_status.clone(),
-        req.from_block,
-        req.to_block,
+        (chain_permit, global_permit),
+        pipeline.job_status.clone(),
+        req.range.from_block,
+        req.range.to_block,
     ));
     // Poisoning is all but impossible: the guard is never held across an `.await` and no holder panics.
-    *state
+    *pipeline
         .replay_task
         .lock()
         .expect("replay_task mutex poisoned") = Some(handle);
@@ -147,7 +182,30 @@ pub(crate) async fn replay(
     ))
 }
 
-/// `GET /replay/status` returns the current (or most recent) replay job status.
-pub(crate) async fn replay_status(State(state): State<AppState>) -> Json<ReplayJobStatus> {
-    Json(state.job_status.read().await.clone())
+/// `GET /replay/status` returns the current (or most recent) replay job
+/// status. With `?chain_id=<id>`, returns just that chain's status; an unknown
+/// chain yields `ReplayError::ChainNotConfigured` (400).
+/// Without it, returns every configured chain's status as a JSON object
+/// keyed by chain_id.
+pub(crate) async fn replay_status(
+    State(state): State<AppState>,
+    Query(query): Query<ChainQuery>,
+) -> Result<Json<BTreeMap<u32, ReplayJobStatus>>, ReplayError> {
+    match query.parse_chain_id()? {
+        Some(chain_id) => {
+            let pipeline = state
+                .registry
+                .get(chain_id)
+                .ok_or(ReplayError::ChainNotConfigured { chain_id })?;
+            let status = pipeline.job_status.read().await.clone();
+            Ok(Json(BTreeMap::from([(chain_id, status)])))
+        }
+        None => {
+            let mut out = BTreeMap::new();
+            for (&chain_id, pipeline) in &state.registry.pipelines {
+                out.insert(chain_id, pipeline.job_status.read().await.clone());
+            }
+            Ok(Json(out))
+        }
+    }
 }

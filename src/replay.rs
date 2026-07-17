@@ -9,6 +9,7 @@ use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
 use tracing::warn;
 
 use crate::chain::BlockReader;
+use crate::error::ReplayError;
 use crate::events::log_event;
 use crate::nats::Publisher;
 
@@ -79,11 +80,45 @@ impl ReplayJobStatus {
     }
 }
 
-/// Request body for `POST /replay`: the inclusive block range to replay.
-#[derive(Debug, Deserialize, Serialize)]
-pub(crate) struct ReplayRequest {
+/// Query parameter carrying the target chain id. `POST /replay` requires it
+/// (the handler rejects `None` with `ReplayError::MissingChainId`);
+/// `GET /replay/status` treats `None` as "every configured chain".
+#[derive(Debug, Deserialize)]
+pub(crate) struct ChainQuery {
+    pub(crate) chain_id: Option<String>,
+}
+
+impl ChainQuery {
+    /// Parse the raw `chain_id` into a numeric id. Returns `Ok(None)` when the
+    /// parameter is absent, and `ReplayError::InvalidChainId` for a present but
+    /// non-numeric value.
+    pub(crate) fn parse_chain_id(&self) -> Result<Option<u32>, ReplayError> {
+        self.chain_id
+            .as_deref()
+            .map(|v| {
+                v.parse::<u32>().map_err(|_| ReplayError::InvalidChainId {
+                    value: v.to_string(),
+                })
+            })
+            .transpose()
+    }
+}
+
+/// JSON body for `POST /replay`: the inclusive block range to replay.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct ReplayBody {
     pub(crate) from_block: u64,
     pub(crate) to_block: u64,
+}
+
+/// Echoed back in `ReplayAccepted`: the chain and block range that were accepted.
+/// The range fields are flattened, so this still serializes as
+/// `{chain_id, from_block, to_block}`.
+#[derive(Debug, Serialize)]
+pub(crate) struct ReplayRequest {
+    pub(crate) chain_id: u32,
+    #[serde(flatten)]
+    pub(crate) range: ReplayBody,
 }
 
 /// `202` body for `POST /replay`: the replay has been accepted and is running in the background.
@@ -95,13 +130,13 @@ pub(crate) struct ReplayAccepted {
 
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
-/// `permit` is held for the lifetime of the job and dropped when this
-/// function returns, freeing the concurrency slot for another job.
+/// `hold` is held for the lifetime of the job and dropped (releasing the
+/// per-chain and global permits it wraps) when this function returns.
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
     shutdown: watch::Receiver<bool>,
-    permit: OwnedSemaphorePermit,
+    hold: (OwnedSemaphorePermit, OwnedSemaphorePermit),
     status: Arc<RwLock<ReplayJobStatus>>,
     from_block: u64,
     to_block: u64,
@@ -197,6 +232,6 @@ pub(crate) async fn run_replay_job(
 
     drop(slot);
 
-    // Release the permit now that the terminal status has been written to the slot.
-    drop(permit);
+    // Release the held permit(s) now that the terminal status has been written to the slot.
+    drop(hold);
 }

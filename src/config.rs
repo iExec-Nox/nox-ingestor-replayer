@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use alloy::primitives::Address;
@@ -33,31 +34,37 @@ impl std::fmt::Debug for TlsConfig {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) struct Config {
-    pub(crate) chain: ChainConfig,
+    pub(crate) chains: HashMap<u32, ChainConfig>,
     pub(crate) nats: NatsConfig,
     pub(crate) server: ServerConfig,
-    pub(crate) api_key: String,
+    pub(crate) replay: ReplayConfig,
 }
 
-impl std::fmt::Debug for Config {
+/// Configuration for the on-demand `POST /replay` endpoint.
+#[derive(Clone, Deserialize)]
+pub(crate) struct ReplayConfig {
+    pub(crate) api_key: String,
+    /// Global cap on concurrently-running replay jobs across all chains (default: 20).
+    pub(crate) max_concurrent_replay_jobs: usize,
+}
+
+impl std::fmt::Debug for ReplayConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("chain", &self.chain)
-            .field("nats", &self.nats)
-            .field("server", &self.server)
+        f.debug_struct("ReplayConfig")
             .field("api_key", &"<redacted>")
+            .field(
+                "max_concurrent_replay_jobs",
+                &self.max_concurrent_replay_jobs,
+            )
             .finish()
     }
 }
 
-/// Chain/RPC configuration
+/// Chain/RPC configuration. The chain ID is the `chains` map key, not a field here.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ChainConfig {
-    /// Chain ID (default: 421614 for Arbitrum Sepolia)
-    pub(crate) chain_id: u32,
-
     /// RPC endpoint URL
     pub(crate) rpc_endpoint: String,
 
@@ -74,11 +81,11 @@ pub(crate) struct ChainConfig {
     /// Bounded retry attempts for a failing batch read
     pub(crate) max_retries: u32,
 
-    /// TCP connection timeout. Default `10s`.
+    /// TCP connection timeout. Default `5s`.
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
     pub(crate) connect_timeout: Duration,
 
-    /// Total per-request RPC timeout (connect + read). Default `30s`.
+    /// Total per-request RPC timeout (connect + read). Default `8s`.
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
     pub(crate) rpc_timeout: Duration,
 }
@@ -144,20 +151,7 @@ impl Config {
         let config = ConfigBuilder::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", "8080")?
-            .set_default("chain.chain_id", 421614)?
-            .set_default(
-                "chain.rpc_endpoint",
-                "https://arbitrum-sepolia-rpc.publicnode.com",
-            )?
-            .set_default(
-                "chain.contract_address",
-                "0x0000000000000000000000000000000000000000",
-            )?
-            .set_default("chain.batch_size", 50)?
-            .set_default("chain.retry_delay", "250ms")?
-            .set_default("chain.max_retries", 5)?
-            .set_default("chain.connect_timeout", "10s")?
-            .set_default("chain.rpc_timeout", "30s")?
+            .set_default("replay.max_concurrent_replay_jobs", 20)?
             .set_default(
                 "nats.urls",
                 vec![

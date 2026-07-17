@@ -41,15 +41,21 @@ pub struct BlockReader {
 }
 
 impl BlockReader {
-    /// Create a new block reader
-    pub(crate) fn new(client: ChainClient, parser: NoxEventParser, config: &ChainConfig) -> Self {
+    /// Create a new block reader for `chain_id` (the reader's owning key in the
+    /// chain registry, not a `ChainConfig` field).
+    pub(crate) fn new(
+        client: ChainClient,
+        parser: NoxEventParser,
+        config: &ChainConfig,
+        chain_id: u32,
+    ) -> Self {
         Self {
             client,
             parser,
             batch_size: config.batch_size,
             retry_delay: config.retry_delay,
             max_retries: config.max_retries,
-            chain_id: config.chain_id,
+            chain_id,
         }
     }
 

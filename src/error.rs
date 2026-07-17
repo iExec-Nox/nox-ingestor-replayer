@@ -80,17 +80,31 @@ pub enum ReplayError {
     #[error("Requested range beyond chain head (to: {to}, latest: {latest})")]
     RangeBeyondHead { to: u64, latest: u64 },
 
-    #[error("Chain busy")]
-    ChainBusy,
+    #[error("Chain {chain_id} busy")]
+    ChainBusy { chain_id: u32 },
 
-    #[error("RPC error: {source}")]
+    #[error("Chain {chain_id} not configured")]
+    ChainNotConfigured { chain_id: u32 },
+
+    #[error("Missing required query parameter: chain_id")]
+    MissingChainId,
+
+    #[error("Invalid chain_id query parameter: {value:?}")]
+    InvalidChainId { value: String },
+
+    #[error("At capacity (max {max} concurrent replay jobs)")]
+    AtCapacity { max: usize },
+
+    #[error("RPC error on chain {chain_id}: {source}")]
     Rpc {
+        chain_id: u32,
         #[source]
         source: RpcError,
     },
 
-    #[error("NATS error: {source}")]
+    #[error("NATS error on chain {chain_id}: {source}")]
     Nats {
+        chain_id: u32,
         #[source]
         source: NatsError,
     },
@@ -103,7 +117,12 @@ impl ReplayError {
             ReplayError::InvalidRange | ReplayError::RangeBeyondHead { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::ChainBusy => StatusCode::CONFLICT,
+            ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
+            ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
+            ReplayError::MissingChainId | ReplayError::InvalidChainId { .. } => {
+                StatusCode::BAD_REQUEST
+            }
+            ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
         }
@@ -112,13 +131,18 @@ impl ReplayError {
     fn retryable(&self) -> bool {
         matches!(
             self,
-            ReplayError::ChainBusy | ReplayError::Nats { .. } | ReplayError::Rpc { .. }
+            ReplayError::ChainBusy { .. }
+                | ReplayError::AtCapacity { .. }
+                | ReplayError::Nats { .. }
+                | ReplayError::Rpc { .. }
         )
     }
 }
 
 impl ReplayError {
-    fn body(&self) -> serde_json::Value {
+    /// Render the JSON error envelope (`{"error": {message, retryable}}`) for
+    /// reuse by handlers that choose their own status code.
+    pub(crate) fn body(&self) -> serde_json::Value {
         json!({
             "error": {
                 "message": self.to_string(),
