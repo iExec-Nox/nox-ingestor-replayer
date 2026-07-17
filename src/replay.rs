@@ -80,16 +80,11 @@ impl ReplayJobStatus {
     }
 }
 
-/// Query parameter for `POST /replay`: which chain to replay.
+/// Query parameter carrying the target chain id. `POST /replay` requires it
+/// (the handler rejects `None` with `ReplayError::MissingChainId`);
+/// `GET /replay/status` treats `None` as "every configured chain".
 #[derive(Debug, Deserialize)]
-pub(crate) struct ReplayQuery {
-    pub(crate) chain_id: u32,
-}
-
-/// Optional query parameter for `GET /replay/status`: `None` returns every
-/// configured chain's status, `Some(_)` returns only that chain's.
-#[derive(Debug, Deserialize)]
-pub(crate) struct StatusQuery {
+pub(crate) struct ChainQuery {
     pub(crate) chain_id: Option<u32>,
 }
 
