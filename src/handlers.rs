@@ -9,7 +9,7 @@ use axum::{
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
@@ -197,8 +197,8 @@ pub(crate) async fn replay_status(
 /// chain, prefer `GET /replay/{chain_id}`.
 pub(crate) async fn replay_status_all(
     State(state): State<AppState>,
-) -> Json<HashMap<u32, ReplayJobStatus>> {
-    let mut out = HashMap::with_capacity(state.registry.pipelines.len());
+) -> Json<BTreeMap<u32, ReplayJobStatus>> {
+    let mut out = BTreeMap::new();
     for (&chain_id, pipeline) in &state.registry.pipelines {
         out.insert(chain_id, pipeline.job_status.read().await.clone());
     }
