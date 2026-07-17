@@ -6,6 +6,7 @@ use axum::{
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
+use axum_prometheus::metrics::counter;
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -172,6 +173,8 @@ pub(crate) async fn replay(
         .replay_task
         .lock()
         .expect("replay_task mutex poisoned") = Some(handle);
+
+    counter!("nox_replayer.replay.requests_total", "outcome" => "ok").increment(1);
 
     Ok((
         StatusCode::ACCEPTED,
