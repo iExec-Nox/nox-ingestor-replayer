@@ -61,12 +61,20 @@ impl Application {
 
         gauge!("nox_replayer.nats.connection_state").set(0.0);
         counter!("nox_replayer.nats.reconnects_total").absolute(0);
+        counter!("nox_replayer.nats.publish_retries_total").absolute(0);
+        gauge!("nox_replayer.build_info", "version" => env!("CARGO_PKG_VERSION")).set(1.0);
         for chain_id in self.config.chains.keys() {
             let cid = chain_id.to_string();
             counter!("nox_replayer.replay.transactions_published_total", "chain_id" => cid.clone())
                 .absolute(0);
             counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone()).absolute(0);
-            counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid).absolute(0);
+            counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid.clone()).absolute(0);
+            counter!("nox_replayer.replay.blocks_read_total", "chain_id" => cid.clone())
+                .absolute(0);
+            counter!("nox_replayer.replay.rpc_errors_total", "chain_id" => cid.clone()).absolute(0);
+            counter!("nox_replayer.replay.publish_errors_total", "chain_id" => cid.clone())
+                .absolute(0);
+            gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => cid).set(0.0);
         }
 
         let nats_client = Arc::new(NatsClient::connect(&self.config.nats).await?);
