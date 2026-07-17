@@ -2,6 +2,7 @@
 
 use async_nats::HeaderMap;
 use async_nats::jetstream::Context as JetStreamContext;
+use axum_prometheus::metrics::counter;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -80,6 +81,7 @@ impl Publisher {
                 Ok(outcome) => return Ok(outcome),
                 Err(e) if Self::should_retry(&e, attempt, self.publish_max_retries) => {
                     attempt += 1;
+                    counter!("nox_replayer.nats.publish_retries_total").increment(1);
                     warn!(
                         attempt,
                         max_retries = self.publish_max_retries,
