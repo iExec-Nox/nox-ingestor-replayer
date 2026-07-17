@@ -1,5 +1,6 @@
 //! Async replay job execution and status tracking.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -79,8 +80,28 @@ impl ReplayJobStatus {
     }
 }
 
-/// Request body for `POST /replay`: which chain, and the inclusive block range to replay.
-#[derive(Debug, Deserialize, Serialize)]
+/// Query parameter for `POST /replay`: which chain to replay.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReplayQuery {
+    pub(crate) chain_id: u32,
+}
+
+/// Optional query parameter for `GET /replay/status`: `None` returns every
+/// configured chain's status, `Some(_)` returns only that chain's.
+#[derive(Debug, Deserialize)]
+pub(crate) struct StatusQuery {
+    pub(crate) chain_id: Option<u32>,
+}
+
+/// JSON body for `POST /replay`: the inclusive block range to replay.
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReplayBody {
+    pub(crate) from_block: u64,
+    pub(crate) to_block: u64,
+}
+
+/// Echoed back in `ReplayAccepted`: the chain and block range that were accepted.
+#[derive(Debug, Serialize)]
 pub(crate) struct ReplayRequest {
     pub(crate) chain_id: u32,
     pub(crate) from_block: u64,
@@ -92,6 +113,16 @@ pub(crate) struct ReplayRequest {
 pub(crate) struct ReplayAccepted {
     pub(crate) request: ReplayRequest,
     pub(crate) accepted_at: DateTime<Utc>,
+}
+
+/// Response body for `GET /replay/status`: a single chain's status when
+/// `chain_id` is given, or every configured chain's status keyed by
+/// chain_id when it's omitted.
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum StatusResponse {
+    Single(ReplayJobStatus),
+    All(BTreeMap<u32, ReplayJobStatus>),
 }
 
 /// Run a replay job to completion, writing progress into `status` as it goes.
