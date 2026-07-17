@@ -133,7 +133,9 @@ impl ReplayError {
 }
 
 impl ReplayError {
-    fn body(&self) -> serde_json::Value {
+    /// Render the JSON error envelope (`{"error": {message, retryable}}`) for
+    /// reuse by handlers that choose their own status code.
+    pub(crate) fn body(&self) -> serde_json::Value {
         json!({
             "error": {
                 "message": self.to_string(),
