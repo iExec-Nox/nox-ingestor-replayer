@@ -193,12 +193,7 @@ pub(crate) async fn replay_status(
             let pipeline = state.registry.get(chain_id).ok_or_else(|| {
                 (
                     StatusCode::NOT_FOUND,
-                    Json(json!({
-                        "error": {
-                            "message": format!("chain {chain_id} not configured"),
-                            "retryable": false,
-                        }
-                    })),
+                    Json(ReplayError::ChainNotConfigured { chain_id }.body()),
                 )
             })?;
             let status = pipeline.job_status.read().await.clone();
