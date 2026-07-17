@@ -89,18 +89,20 @@ pub(crate) struct ChainQuery {
 }
 
 /// JSON body for `POST /replay`: the inclusive block range to replay.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct ReplayBody {
     pub(crate) from_block: u64,
     pub(crate) to_block: u64,
 }
 
 /// Echoed back in `ReplayAccepted`: the chain and block range that were accepted.
+/// The range fields are flattened, so this still serializes as
+/// `{chain_id, from_block, to_block}`.
 #[derive(Debug, Serialize)]
 pub(crate) struct ReplayRequest {
     pub(crate) chain_id: u32,
-    pub(crate) from_block: u64,
-    pub(crate) to_block: u64,
+    #[serde(flatten)]
+    pub(crate) range: ReplayBody,
 }
 
 /// `202` body for `POST /replay`: the replay has been accepted and is running in the background.
