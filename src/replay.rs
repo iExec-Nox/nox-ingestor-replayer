@@ -115,10 +115,6 @@ pub(crate) struct ReplayAccepted {
 ///
 /// `hold` is held for the lifetime of the job and dropped (releasing the
 /// per-chain and global permits it wraps) when this function returns.
-///
-/// On panic `hold` still drops (409/503 recovers) but the slot is left in its
-/// last `Running` state until the next job overwrites it — a panic here is a
-/// bug, not a modeled state.
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
