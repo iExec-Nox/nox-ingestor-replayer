@@ -2,7 +2,7 @@
 
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Query, State},
     http::{StatusCode, Uri},
     response::IntoResponse,
 };
@@ -14,7 +14,10 @@ use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
-use crate::replay::{ReplayAccepted, ReplayJobStatus, ReplayRequest, run_replay_job};
+use crate::replay::{
+    ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayQuery, ReplayRequest, StatusQuery,
+    StatusResponse, run_replay_job,
+};
 
 /// Health check endpoint handler.
 ///
@@ -89,21 +92,29 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
     }
 }
 
-/// `POST /replay` accepts a chain ID and a block range and replays it in a
-/// background task, publishing each transaction to NATS.
+/// `POST /replay?chain_id=<id>` accepts a chain ID (query parameter) and a
+/// block range (body) and replays it in a background task, publishing each
+/// transaction to NATS.
 ///
 /// Pre-flight failures (auth, validation, unknown chain, busy, at-capacity,
 /// NATS/RPC pre-checks) return an error status synchronously. Once accepted,
 /// the replay runs asynchronously; progress and the terminal outcome are
-/// available via `GET /replay/{chain_id}`. Retries and resumes reuse the
-/// deterministic `Nats-Msg-Id`, so JetStream dedups them.
+/// available via `GET /replay/status?chain_id=<id>`. Retries and resumes
+/// reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
 pub(crate) async fn replay(
     State(state): State<AppState>,
+    Query(query): Query<ReplayQuery>,
     headers: axum::http::HeaderMap,
-    Json(req): Json<ReplayRequest>,
+    Json(body): Json<ReplayBody>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
     check_api_key(&headers, &state.replay.api_key)?;
-    validate_span(req.from_block, req.to_block)?;
+    validate_span(body.from_block, body.to_block)?;
+
+    let req = ReplayRequest {
+        chain_id: query.chain_id,
+        from_block: body.from_block,
+        to_block: body.to_block,
+    };
 
     let pipeline = state
         .registry
@@ -167,40 +178,39 @@ pub(crate) async fn replay(
     ))
 }
 
-/// `GET /replay/{chain_id}` returns the current (or most recent) replay job
-/// status for that chain. Deliberately NOT a `ReplayError` — an unknown chain
-/// here is a plain 404, not a request outcome we want folded into replay
-/// request metrics.
+/// `GET /replay/status` returns the current (or most recent) replay job
+/// status. With `?chain_id=<id>`, returns just that chain's status
+/// (deliberately NOT a `ReplayError` — an unknown chain here is a plain 404,
+/// not a request outcome we want folded into replay request metrics).
+/// Without it, returns every configured chain's status as a JSON object
+/// keyed by chain_id.
 pub(crate) async fn replay_status(
     State(state): State<AppState>,
-    Path(chain_id): Path<u32>,
-) -> Result<Json<ReplayJobStatus>, (StatusCode, Json<Value>)> {
-    let pipeline = state.registry.get(chain_id).ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            Json(json!({
-                "error": {
-                    "kind": "chain_not_configured",
-                    "message": format!("chain {chain_id} not configured"),
-                    "retryable": false,
-                }
-            })),
-        )
-    })?;
-    let status = pipeline.job_status.read().await.clone();
-    Ok(Json(status))
-}
-
-/// `GET /replay/status` returns the current (or most recent) replay job
-/// status for every configured chain, as a JSON object keyed by chain_id.
-/// Supersedes the former lowest-numbered-chain legacy shim. For a single
-/// chain, prefer `GET /replay/{chain_id}`.
-pub(crate) async fn replay_status_all(
-    State(state): State<AppState>,
-) -> Json<BTreeMap<u32, ReplayJobStatus>> {
-    let mut out = BTreeMap::new();
-    for (&chain_id, pipeline) in &state.registry.pipelines {
-        out.insert(chain_id, pipeline.job_status.read().await.clone());
+    Query(query): Query<StatusQuery>,
+) -> Result<Json<StatusResponse>, (StatusCode, Json<Value>)> {
+    match query.chain_id {
+        Some(chain_id) => {
+            let pipeline = state.registry.get(chain_id).ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({
+                        "error": {
+                            "kind": "chain_not_configured",
+                            "message": format!("chain {chain_id} not configured"),
+                            "retryable": false,
+                        }
+                    })),
+                )
+            })?;
+            let status = pipeline.job_status.read().await.clone();
+            Ok(Json(StatusResponse::Single(status)))
+        }
+        None => {
+            let mut out = BTreeMap::new();
+            for (&chain_id, pipeline) in &state.registry.pipelines {
+                out.insert(chain_id, pipeline.job_status.read().await.clone());
+            }
+            Ok(Json(StatusResponse::All(out)))
+        }
     }
-    Json(out)
 }
