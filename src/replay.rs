@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum_prometheus::metrics::counter;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
@@ -141,6 +142,7 @@ pub(crate) async fn run_replay_job(
     from_block: u64,
     to_block: u64,
 ) {
+    let cid = source.chain_id().to_string();
     let start = Instant::now();
     let mut progress = ReplayProgress {
         current_block: from_block,
@@ -190,8 +192,14 @@ pub(crate) async fn run_replay_job(
                     }
                     progress.transactions_published += 1;
                     progress.events_total += tx.events.len() as u64;
+                    counter!("nox_replayer.replay.transactions_published_total", "chain_id" => cid.clone())
+                        .increment(1);
+                    counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone())
+                        .increment(tx.events.len() as u64);
                     if outcome.duplicate {
                         progress.duplicates += 1;
+                        counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid.clone())
+                            .increment(1);
                     }
                 }
                 Err(e) => {
