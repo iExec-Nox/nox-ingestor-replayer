@@ -4,6 +4,7 @@ use async_nats::jetstream::context::PublishErrorKind;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use axum_prometheus::metrics::counter;
 use serde_json::json;
 use thiserror::Error;
 use tracing::warn;
@@ -140,6 +141,22 @@ impl ReplayError {
 }
 
 impl ReplayError {
+    /// Short, stable label for the `requests_total{outcome=...}` metric
+    fn kind(&self) -> &'static str {
+        match self {
+            ReplayError::Unauthorized => "unauthorized",
+            ReplayError::InvalidRange => "invalid_range",
+            ReplayError::RangeBeyondHead { .. } => "range_beyond_head",
+            ReplayError::ChainBusy { .. } => "chain_busy",
+            ReplayError::ChainNotConfigured { .. } => "chain_not_configured",
+            ReplayError::MissingChainId => "missing_chain_id",
+            ReplayError::InvalidChainId { .. } => "invalid_chain_id",
+            ReplayError::AtCapacity { .. } => "at_capacity",
+            ReplayError::Rpc { .. } => "rpc_error",
+            ReplayError::Nats { .. } => "nats_error",
+        }
+    }
+
     /// Render the JSON error envelope (`{"error": {message, retryable}}`) for
     /// reuse by handlers that choose their own status code.
     pub(crate) fn body(&self) -> serde_json::Value {
@@ -161,6 +178,8 @@ impl IntoResponse for ReplayError {
         }
 
         let body = self.body();
+
+        counter!("nox_replayer.replay.requests_total", "outcome" => self.kind()).increment(1);
 
         (status, Json(body)).into_response()
     }
