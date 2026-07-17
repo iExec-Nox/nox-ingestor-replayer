@@ -84,7 +84,7 @@ Configuration is loaded from environment variables with the `NOX_REPLAYER_` pref
 | `NOX_REPLAYER_CHAINS__<chain_id>__CONNECT_TIMEOUT` | TCP connection timeout for RPC requests | No | `5s` |
 | `NOX_REPLAYER_CHAINS__<chain_id>__RPC_TIMEOUT` | Total per-request RPC timeout (connect + read) | No | `8s` |
 | `NOX_REPLAYER_REPLAY__API_KEY` | API key required in the `X-Api-Key` header to authorize `POST /replay`. An empty value always rejects the request (no way to disable auth). | **Yes** | _(none)_ |
-| `NOX_REPLAYER_REPLAY__MAX_CONCURRENT_CHAINS` | Global cap on concurrently-running replay jobs across all chains | No | `20` |
+| `NOX_REPLAYER_REPLAY__MAX_CONCURRENT_REPLAY_JOBS` | Global cap on concurrently-running replay jobs across all chains | No | `20` |
 | `NOX_REPLAYER_NATS__URLS` | NATS server URLs, comma-separated. One URL = single-node; several = cluster with transparent failover. Use the `tls://` scheme for immediate-TLS servers, `nats://` for STARTTLS / plaintext. | No | `nats://localhost:4221,nats://localhost:4222,nats://localhost:4223` |
 | `NOX_REPLAYER_NATS__TLS__ENABLED` | Enable mTLS. When `false`, connects in plaintext and the CA/CERT/KEY vars are ignored. | No | `true` |
 | `NOX_REPLAYER_NATS__TLS__CA` | CA certificate **PEM content** (not a path). Required when TLS enabled. | When TLS on | _(empty)_ |
