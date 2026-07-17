@@ -1,6 +1,5 @@
 //! Async replay job execution and status tracking.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -110,16 +109,6 @@ pub(crate) struct ReplayRequest {
 pub(crate) struct ReplayAccepted {
     pub(crate) request: ReplayRequest,
     pub(crate) accepted_at: DateTime<Utc>,
-}
-
-/// Response body for `GET /replay/status`: a single chain's status when
-/// `chain_id` is given, or every configured chain's status keyed by
-/// chain_id when it's omitted.
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub(crate) enum StatusResponse {
-    Single(ReplayJobStatus),
-    All(BTreeMap<u32, ReplayJobStatus>),
 }
 
 /// Run a replay job to completion, writing progress into `status` as it goes.
