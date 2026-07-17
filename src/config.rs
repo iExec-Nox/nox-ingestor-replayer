@@ -47,14 +47,17 @@ pub(crate) struct Config {
 pub(crate) struct ReplayConfig {
     pub(crate) api_key: String,
     /// Global cap on concurrently-running replay jobs across all chains (default: 20).
-    pub(crate) max_concurrent_chains: usize,
+    pub(crate) max_concurrent_replay_jobs: usize,
 }
 
 impl std::fmt::Debug for ReplayConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayConfig")
             .field("api_key", &"<redacted>")
-            .field("max_concurrent_chains", &self.max_concurrent_chains)
+            .field(
+                "max_concurrent_replay_jobs",
+                &self.max_concurrent_replay_jobs,
+            )
             .finish()
     }
 }
@@ -78,11 +81,11 @@ pub(crate) struct ChainConfig {
     /// Bounded retry attempts for a failing batch read
     pub(crate) max_retries: u32,
 
-    /// TCP connection timeout. Default `10s`.
+    /// TCP connection timeout. Default `5s`.
     #[serde(with = "humantime_serde", default = "default_connect_timeout")]
     pub(crate) connect_timeout: Duration,
 
-    /// Total per-request RPC timeout (connect + read). Default `30s`.
+    /// Total per-request RPC timeout (connect + read). Default `8s`.
     #[serde(with = "humantime_serde", default = "default_rpc_timeout")]
     pub(crate) rpc_timeout: Duration,
 }
@@ -148,7 +151,7 @@ impl Config {
         let config = ConfigBuilder::builder()
             .set_default("server.host", "127.0.0.1")?
             .set_default("server.port", "8080")?
-            .set_default("replay.max_concurrent_chains", 20)?
+            .set_default("replay.max_concurrent_replay_jobs", 20)?
             .set_default(
                 "nats.urls",
                 vec![
