@@ -89,17 +89,22 @@ pub enum ReplayError {
     #[error("Missing required query parameter: chain_id")]
     MissingChainId,
 
-    #[error("At capacity (max {max} concurrent chains)")]
+    #[error("Invalid chain_id query parameter: {value:?}")]
+    InvalidChainId { value: String },
+
+    #[error("At capacity (max {max} concurrent replay jobs)")]
     AtCapacity { max: usize },
 
-    #[error("RPC error: {source}")]
+    #[error("RPC error on chain {chain_id}: {source}")]
     Rpc {
+        chain_id: u32,
         #[source]
         source: RpcError,
     },
 
-    #[error("NATS error: {source}")]
+    #[error("NATS error on chain {chain_id}: {source}")]
     Nats {
+        chain_id: u32,
         #[source]
         source: NatsError,
     },
@@ -114,7 +119,9 @@ impl ReplayError {
             }
             ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
             ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
-            ReplayError::MissingChainId => StatusCode::BAD_REQUEST,
+            ReplayError::MissingChainId | ReplayError::InvalidChainId { .. } => {
+                StatusCode::BAD_REQUEST
+            }
             ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
