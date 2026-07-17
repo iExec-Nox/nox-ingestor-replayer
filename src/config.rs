@@ -73,10 +73,10 @@ pub(crate) struct Config {
 /// Configuration for the on-demand `POST /replay` endpoint.
 #[derive(Clone, Deserialize, Validate)]
 pub(crate) struct ReplayConfig {
-    #[validate(length(min = 1))]
+    #[validate(length(min = 18))]
     pub(crate) api_key: String,
     /// Global cap on concurrently-running replay jobs across all chains (default: 20).
-    #[validate(range(min = 1))]
+    #[validate(range(min = 1, max = 20))]
     pub(crate) max_concurrent_replay_jobs: usize,
 }
 
