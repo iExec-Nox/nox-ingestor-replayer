@@ -101,7 +101,7 @@ impl Application {
             .route("/health", get(handlers::health_check))
             .route("/metrics", get(handlers::metrics))
             .route("/replay", post(handlers::replay))
-            .route("/replay/status", get(handlers::replay_status_legacy))
+            .route("/replay/status", get(handlers::replay_status_all))
             .route("/replay/{chain_id}", get(handlers::replay_status))
             .fallback(handlers::not_found)
             .layer(prometheus_layer)
