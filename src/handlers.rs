@@ -15,8 +15,8 @@ use subtle::ConstantTimeEq;
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
 use crate::replay::{
-    ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayQuery, ReplayRequest, StatusQuery,
-    StatusResponse, run_replay_job,
+    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, StatusResponse,
+    run_replay_job,
 };
 
 /// Health check endpoint handler.
@@ -103,15 +103,16 @@ fn check_api_key(headers: &axum::http::HeaderMap, expected: &str) -> Result<(), 
 /// reuse the deterministic `Nats-Msg-Id`, so JetStream dedups them.
 pub(crate) async fn replay(
     State(state): State<AppState>,
-    Query(query): Query<ReplayQuery>,
+    Query(query): Query<ChainQuery>,
     headers: axum::http::HeaderMap,
     Json(body): Json<ReplayBody>,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
     check_api_key(&headers, &state.replay.api_key)?;
+    let chain_id = query.chain_id.ok_or(ReplayError::MissingChainId)?;
     validate_span(body.from_block, body.to_block)?;
 
     let req = ReplayRequest {
-        chain_id: query.chain_id,
+        chain_id,
         from_block: body.from_block,
         to_block: body.to_block,
     };
@@ -186,7 +187,7 @@ pub(crate) async fn replay(
 /// keyed by chain_id.
 pub(crate) async fn replay_status(
     State(state): State<AppState>,
-    Query(query): Query<StatusQuery>,
+    Query(query): Query<ChainQuery>,
 ) -> Result<Json<StatusResponse>, (StatusCode, Json<Value>)> {
     match query.chain_id {
         Some(chain_id) => {
