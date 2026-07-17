@@ -15,8 +15,7 @@ use subtle::ConstantTimeEq;
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
 use crate::replay::{
-    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, StatusResponse,
-    run_replay_job,
+    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
 };
 
 /// Health check endpoint handler.
@@ -188,7 +187,7 @@ pub(crate) async fn replay(
 pub(crate) async fn replay_status(
     State(state): State<AppState>,
     Query(query): Query<ChainQuery>,
-) -> Result<Json<StatusResponse>, (StatusCode, Json<Value>)> {
+) -> Result<Json<BTreeMap<u32, ReplayJobStatus>>, (StatusCode, Json<Value>)> {
     match query.chain_id {
         Some(chain_id) => {
             let pipeline = state.registry.get(chain_id).ok_or_else(|| {
@@ -204,14 +203,14 @@ pub(crate) async fn replay_status(
                 )
             })?;
             let status = pipeline.job_status.read().await.clone();
-            Ok(Json(StatusResponse::Single(status)))
+            Ok(Json(BTreeMap::from([(chain_id, status)])))
         }
         None => {
             let mut out = BTreeMap::new();
             for (&chain_id, pipeline) in &state.registry.pipelines {
                 out.insert(chain_id, pipeline.job_status.read().await.clone());
             }
-            Ok(Json(StatusResponse::All(out)))
+            Ok(Json(out))
         }
     }
 }
