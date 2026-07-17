@@ -10,6 +10,7 @@ use axum::{
 };
 use axum_prometheus::{
     Handle, MakeDefaultHandle, PrometheusMetricLayerBuilder,
+    metrics::{counter, gauge},
     metrics_exporter_prometheus::PrometheusHandle,
 };
 use tokio::signal;
@@ -53,6 +54,21 @@ impl Application {
         debug!("Starting ingestor replayer");
         debug!("Config: {:?}", self.config);
 
+        let prometheus_layer = PrometheusMetricLayerBuilder::new()
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
+            .build();
+        let metrics_handle = Handle::make_default_handle(Handle::default());
+
+        gauge!("nox_replayer.nats.connection_state").set(0.0);
+        counter!("nox_replayer.nats.reconnects_total").absolute(0);
+        for chain_id in self.config.chains.keys() {
+            let cid = chain_id.to_string();
+            counter!("nox_replayer.replay.transactions_published_total", "chain_id" => cid.clone())
+                .absolute(0);
+            counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone()).absolute(0);
+            counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid).absolute(0);
+        }
+
         let nats_client = Arc::new(NatsClient::connect(&self.config.nats).await?);
         nats_client.setup_stream(&self.config.nats).await?;
 
@@ -74,11 +90,6 @@ impl Application {
             pipelines,
             self.config.replay.max_concurrent_replay_jobs,
         ));
-
-        let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
-            .build();
-        let metrics_handle = Handle::make_default_handle(Handle::default());
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
