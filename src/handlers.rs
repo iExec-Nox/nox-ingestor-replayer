@@ -113,8 +113,7 @@ pub(crate) async fn replay(
 
     let req = ReplayRequest {
         chain_id,
-        from_block: body.from_block,
-        to_block: body.to_block,
+        range: body,
     };
 
     let pipeline = state
@@ -151,9 +150,10 @@ pub(crate) async fn replay(
         .latest_block()
         .await
         .map_err(|source| ReplayError::Rpc { source })?;
-    check_within_head(req.to_block, latest)?;
+    check_within_head(req.range.to_block, latest)?;
 
-    *pipeline.job_status.write().await = ReplayJobStatus::running(req.from_block, req.to_block);
+    *pipeline.job_status.write().await =
+        ReplayJobStatus::running(req.range.from_block, req.range.to_block);
 
     let handle = tokio::spawn(run_replay_job(
         pipeline.reader.clone(),
@@ -161,8 +161,8 @@ pub(crate) async fn replay(
         state.shutdown.clone(),
         (chain_permit, global_permit),
         pipeline.job_status.clone(),
-        req.from_block,
-        req.to_block,
+        req.range.from_block,
+        req.range.to_block,
     ));
     // Poisoning is all but impossible: the guard is never held across an `.await` and no holder panics.
     *pipeline
