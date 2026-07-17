@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum_prometheus::metrics::counter;
+use axum_prometheus::metrics::{counter, gauge, histogram};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
@@ -129,6 +129,26 @@ pub(crate) struct ReplayAccepted {
     pub(crate) accepted_at: DateTime<Utc>,
 }
 
+/// Increments the per-chain `jobs_in_flight` gauge on construction and
+/// decrements it on drop, keeping the gauge correct across early returns and panics.
+struct InFlightGuard {
+    chain_id: String,
+}
+
+impl InFlightGuard {
+    fn new(chain_id: String) -> Self {
+        gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => chain_id.clone()).increment(1.0);
+        Self { chain_id }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => self.chain_id.clone())
+            .decrement(1.0);
+    }
+}
+
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
 /// `hold` is held for the lifetime of the job and dropped (releasing the
@@ -143,6 +163,7 @@ pub(crate) async fn run_replay_job(
     to_block: u64,
 ) {
     let cid = source.chain_id().to_string();
+    let _in_flight = InFlightGuard::new(cid.clone());
     let start = Instant::now();
     let mut progress = ReplayProgress {
         current_block: from_block,
@@ -164,9 +185,18 @@ pub(crate) async fn run_replay_job(
             .saturating_add(source.batch_size().saturating_sub(1))
             .min(to_block);
 
+        let read_start = Instant::now();
         let batch = match source.read_batch_bounded(current, batch_to).await {
-            Ok(batch) => batch,
+            Ok(batch) => {
+                histogram!("nox_replayer.replay.rpc_read_seconds", "chain_id" => cid.clone())
+                    .record(read_start.elapsed().as_secs_f64());
+                counter!("nox_replayer.replay.blocks_read_total", "chain_id" => cid.clone())
+                    .increment(batch_to - current + 1);
+                batch
+            }
             Err(e) => {
+                counter!("nox_replayer.replay.rpc_errors_total", "chain_id" => cid.clone())
+                    .increment(1);
                 warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
                 stop_reason = Some(StopReason::RpcError);
                 resume_from = current;
@@ -196,6 +226,8 @@ pub(crate) async fn run_replay_job(
                         .increment(1);
                     counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone())
                         .increment(tx.events.len() as u64);
+                    gauge!("nox_replayer.replay.last_published_block", "chain_id" => cid.clone())
+                        .set(tx.block_number as f64);
                     if outcome.duplicate {
                         progress.duplicates += 1;
                         counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid.clone())
@@ -203,6 +235,8 @@ pub(crate) async fn run_replay_job(
                     }
                 }
                 Err(e) => {
+                    counter!("nox_replayer.replay.publish_errors_total", "chain_id" => cid.clone())
+                        .increment(1);
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
                     stop_reason = Some(StopReason::NatsError);
                     // Resume from the failed block; already-acked blocks are not re-read.
@@ -239,6 +273,19 @@ pub(crate) async fn run_replay_job(
     }
 
     drop(slot);
+
+    let result = match stop_reason {
+        None | Some(StopReason::Completed) => "completed",
+        Some(StopReason::ShutdownSignal) => "shutdown",
+        Some(StopReason::RpcError) => "rpc_error",
+        Some(StopReason::NatsError) => "nats_error",
+    };
+    histogram!(
+        "nox_replayer.replay.job_duration_seconds",
+        "chain_id" => cid.clone(),
+        "result" => result,
+    )
+    .record(start.elapsed().as_secs_f64());
 
     // Release the held permit(s) now that the terminal status has been written to the slot.
     drop(hold);
