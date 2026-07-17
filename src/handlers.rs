@@ -9,6 +9,7 @@ use axum::{
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
@@ -191,28 +192,15 @@ pub(crate) async fn replay_status(
 }
 
 /// `GET /replay/status` returns the current (or most recent) replay job
-/// status for the lowest-numbered configured chain. Legacy single-chain
-/// compat path predating multichain support; prefer `GET /replay/{chain_id}`.
-pub(crate) async fn replay_status_legacy(
+/// status for every configured chain, as a JSON object keyed by chain_id.
+/// Supersedes the former lowest-numbered-chain legacy shim. For a single
+/// chain, prefer `GET /replay/{chain_id}`.
+pub(crate) async fn replay_status_all(
     State(state): State<AppState>,
-) -> Result<Json<ReplayJobStatus>, (StatusCode, Json<Value>)> {
-    let chain_id = state
-        .registry
-        .pipelines
-        .keys()
-        .min()
-        .copied()
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": {
-                        "kind": "chain_not_configured",
-                        "message": "no chains configured",
-                        "retryable": false,
-                    }
-                })),
-            )
-        })?;
-    replay_status(State(state), Path(chain_id)).await
+) -> Json<HashMap<u32, ReplayJobStatus>> {
+    let mut out = HashMap::with_capacity(state.registry.pipelines.len());
+    for (&chain_id, pipeline) in &state.registry.pipelines {
+        out.insert(chain_id, pipeline.job_status.read().await.clone());
+    }
+    Json(out)
 }
