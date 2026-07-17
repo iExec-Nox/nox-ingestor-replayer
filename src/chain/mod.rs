@@ -47,11 +47,11 @@ pub(crate) struct ChainRegistry {
 impl ChainRegistry {
     pub(crate) fn new(
         pipelines: HashMap<u32, ChainPipeline>,
-        max_concurrent_chains: usize,
+        max_concurrent_replay_jobs: usize,
     ) -> Self {
         Self {
             pipelines,
-            global: Arc::new(Semaphore::new(max_concurrent_chains)),
+            global: Arc::new(Semaphore::new(max_concurrent_replay_jobs)),
         }
     }
 
