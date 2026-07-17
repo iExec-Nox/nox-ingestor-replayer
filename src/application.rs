@@ -72,7 +72,7 @@ impl Application {
         }
         let registry = Arc::new(ChainRegistry::new(
             pipelines,
-            self.config.replay.max_concurrent_chains,
+            self.config.replay.max_concurrent_replay_jobs,
         ));
 
         let prometheus_layer = PrometheusMetricLayerBuilder::new()
@@ -107,8 +107,19 @@ impl Application {
             .with_graceful_shutdown(Self::shutdown_signal(shutdown_tx))
             .await?;
 
-        for pipeline in registry.pipelines.values() {
-            await_replay_task(&pipeline.replay_task, REPLAY_SHUTDOWN_GRACE).await;
+        // Await every chain's in-flight replay task concurrently
+        let drains: Vec<_> = registry
+            .pipelines
+            .values()
+            .map(|pipeline| {
+                let replay_task = pipeline.replay_task.clone();
+                tokio::spawn(async move {
+                    await_replay_task(&replay_task, REPLAY_SHUTDOWN_GRACE).await;
+                })
+            })
+            .collect();
+        for drain in drains {
+            let _ = drain.await;
         }
 
         Ok(())
