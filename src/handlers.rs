@@ -180,7 +180,7 @@ pub(crate) async fn replay(
 
 /// `GET /replay/status` returns the current (or most recent) replay job
 /// status. With `?chain_id=<id>`, returns just that chain's status
-/// (deliberately NOT a `ReplayError` — an unknown chain here is a plain 404,
+/// (deliberately NOT a `ReplayError` as an unknown chain here is a plain 404,
 /// not a request outcome we want folded into replay request metrics).
 /// Without it, returns every configured chain's status as a JSON object
 /// keyed by chain_id.
@@ -195,7 +195,6 @@ pub(crate) async fn replay_status(
                     StatusCode::NOT_FOUND,
                     Json(json!({
                         "error": {
-                            "kind": "chain_not_configured",
                             "message": format!("chain {chain_id} not configured"),
                             "retryable": false,
                         }
