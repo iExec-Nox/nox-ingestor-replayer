@@ -13,6 +13,7 @@ use tracing::{error, info, warn};
 
 use crate::config::{NatsConfig, TlsConfig};
 use crate::error::NatsError;
+use crate::metrics;
 
 /// Connection state for NATS client
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,15 +69,15 @@ impl NatsClient {
                             Event::Connected => {
                                 info!("NATS connected");
                                 let _ = state_tx.send(ConnectionState::Connected);
-                                gauge!("nox_replayer.nats.connection_state").set(1.0);
+                                gauge!(metrics::NATS_CONNECTION_STATE).set(1.0);
                                 if seen_connect.swap(true, Ordering::Relaxed) {
-                                    counter!("nox_replayer.nats.reconnects_total").increment(1);
+                                    counter!(metrics::NATS_RECONNECTS_TOTAL).increment(1);
                                 }
                             }
                             Event::Disconnected => {
                                 warn!("NATS disconnected");
                                 let _ = state_tx.send(ConnectionState::Disconnected);
-                                gauge!("nox_replayer.nats.connection_state").set(0.0);
+                                gauge!(metrics::NATS_CONNECTION_STATE).set(0.0);
                             }
                             Event::ServerError(err) => error!(error = %err, "NATS server error"),
                             Event::ClientError(err) => error!(error = %err, "NATS client error"),
