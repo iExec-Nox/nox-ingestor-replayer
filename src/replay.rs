@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use axum_prometheus::metrics::{counter, gauge, histogram};
+use axum_prometheus::metrics::{Gauge, counter, gauge, histogram};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
@@ -12,6 +12,7 @@ use tracing::warn;
 use crate::chain::BlockReader;
 use crate::error::ReplayError;
 use crate::events::log_event;
+use crate::metrics;
 use crate::nats::Publisher;
 
 /// Lifecycle state of the single replay job slot.
@@ -132,20 +133,19 @@ pub(crate) struct ReplayAccepted {
 /// Increments the per-chain `jobs_in_flight` gauge on construction and
 /// decrements it on drop, keeping the gauge correct across early returns and panics.
 struct InFlightGuard {
-    chain_id: String,
+    gauge: Gauge,
 }
 
 impl InFlightGuard {
-    fn new(chain_id: String) -> Self {
-        gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => chain_id.clone()).increment(1.0);
-        Self { chain_id }
+    fn new(gauge: Gauge) -> Self {
+        gauge.increment(1.0);
+        Self { gauge }
     }
 }
 
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
-        gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => self.chain_id.clone())
-            .decrement(1.0);
+        self.gauge.decrement(1.0);
     }
 }
 
@@ -163,7 +163,25 @@ pub(crate) async fn run_replay_job(
     to_block: u64,
 ) {
     let cid = source.chain_id().to_string();
-    let _in_flight = InFlightGuard::new(cid.clone());
+
+    // Resolve each per-chain metric handle once per job instead of re-resolving
+    // (label alloc + registry lookup) on every batch and transaction.
+    let blocks_read = counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let rpc_errors = counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let rpc_read = histogram!(metrics::REPLAY_RPC_READ_SECONDS, metrics::CHAIN_ID => cid.clone());
+    let transactions_published =
+        counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let events = counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let duplicates = counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let publish_errors =
+        counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone());
+    // Resolved lazily on the first successful publish: this gauge is deliberately
+    // absent until a chain publishes, so a replay-lag panel never reads block `0`.
+    let mut last_published_block: Option<Gauge> = None;
+
+    let _in_flight = InFlightGuard::new(
+        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => cid.clone()),
+    );
     let start = Instant::now();
     let mut progress = ReplayProgress {
         current_block: from_block,
@@ -188,15 +206,12 @@ pub(crate) async fn run_replay_job(
         let read_start = Instant::now();
         let batch = match source.read_batch_bounded(current, batch_to).await {
             Ok(batch) => {
-                histogram!("nox_replayer.replay.rpc_read_seconds", "chain_id" => cid.clone())
-                    .record(read_start.elapsed().as_secs_f64());
-                counter!("nox_replayer.replay.blocks_read_total", "chain_id" => cid.clone())
-                    .increment(batch_to - current + 1);
+                rpc_read.record(read_start.elapsed().as_secs_f64());
+                blocks_read.increment(batch_to - current + 1);
                 batch
             }
             Err(e) => {
-                counter!("nox_replayer.replay.rpc_errors_total", "chain_id" => cid.clone())
-                    .increment(1);
+                rpc_errors.increment(1);
                 warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
                 stop_reason = Some(StopReason::RpcError);
                 resume_from = current;
@@ -222,21 +237,20 @@ pub(crate) async fn run_replay_job(
                     }
                     progress.transactions_published += 1;
                     progress.events_total += tx.events.len() as u64;
-                    counter!("nox_replayer.replay.transactions_published_total", "chain_id" => cid.clone())
-                        .increment(1);
-                    counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone())
-                        .increment(tx.events.len() as u64);
-                    gauge!("nox_replayer.replay.last_published_block", "chain_id" => cid.clone())
+                    transactions_published.increment(1);
+                    events.increment(tx.events.len() as u64);
+                    last_published_block
+                        .get_or_insert_with(|| {
+                            gauge!(metrics::REPLAY_LAST_PUBLISHED_BLOCK, metrics::CHAIN_ID => cid.clone())
+                        })
                         .set(tx.block_number as f64);
                     if outcome.duplicate {
                         progress.duplicates += 1;
-                        counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid.clone())
-                            .increment(1);
+                        duplicates.increment(1);
                     }
                 }
                 Err(e) => {
-                    counter!("nox_replayer.replay.publish_errors_total", "chain_id" => cid.clone())
-                        .increment(1);
+                    publish_errors.increment(1);
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
                     stop_reason = Some(StopReason::NatsError);
                     // Resume from the failed block; already-acked blocks are not re-read.
@@ -281,8 +295,8 @@ pub(crate) async fn run_replay_job(
         Some(StopReason::NatsError) => "nats_error",
     };
     histogram!(
-        "nox_replayer.replay.job_duration_seconds",
-        "chain_id" => cid.clone(),
+        metrics::REPLAY_JOB_DURATION_SECONDS,
+        metrics::CHAIN_ID => cid,
         "result" => result,
     )
     .record(start.elapsed().as_secs_f64());
