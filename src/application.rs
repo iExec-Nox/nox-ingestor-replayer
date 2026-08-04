@@ -21,6 +21,7 @@ use tracing::{debug, info, warn};
 use crate::chain::{BlockReader, ChainClient, ChainPipeline, ChainRegistry, NoxEventParser};
 use crate::config::{Config, ReplayConfig};
 use crate::handlers;
+use crate::metrics;
 use crate::nats::{NatsClient, Publisher};
 
 /// Grace period to await an in-flight replay job before the NATS connection
@@ -59,22 +60,24 @@ impl Application {
             .build();
         let metrics_handle = Handle::make_default_handle(Handle::default());
 
-        gauge!("nox_replayer.nats.connection_state").set(0.0);
-        counter!("nox_replayer.nats.reconnects_total").absolute(0);
-        counter!("nox_replayer.nats.publish_retries_total").absolute(0);
-        gauge!("nox_replayer.build_info", "version" => env!("CARGO_PKG_VERSION")).set(1.0);
+        gauge!(metrics::NATS_CONNECTION_STATE).set(0.0);
+        counter!(metrics::NATS_RECONNECTS_TOTAL).absolute(0);
+        counter!(metrics::NATS_PUBLISH_RETRIES_TOTAL).absolute(0);
+        gauge!(metrics::BUILD_INFO, "version" => env!("CARGO_PKG_VERSION")).set(1.0);
         for chain_id in self.config.chains.keys() {
             let cid = chain_id.to_string();
-            counter!("nox_replayer.replay.transactions_published_total", "chain_id" => cid.clone())
+            counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => cid.clone())
                 .absolute(0);
-            counter!("nox_replayer.replay.events_total", "chain_id" => cid.clone()).absolute(0);
-            counter!("nox_replayer.replay.duplicates_total", "chain_id" => cid.clone()).absolute(0);
-            counter!("nox_replayer.replay.blocks_read_total", "chain_id" => cid.clone())
+            counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => cid.clone()).absolute(0);
+            counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => cid.clone())
                 .absolute(0);
-            counter!("nox_replayer.replay.rpc_errors_total", "chain_id" => cid.clone()).absolute(0);
-            counter!("nox_replayer.replay.publish_errors_total", "chain_id" => cid.clone())
+            counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => cid.clone())
                 .absolute(0);
-            gauge!("nox_replayer.replay.jobs_in_flight", "chain_id" => cid).set(0.0);
+            counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone())
+                .absolute(0);
+            counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone())
+                .absolute(0);
+            gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => cid).set(0.0);
         }
 
         let nats_client = Arc::new(NatsClient::connect(&self.config.nats).await?);
