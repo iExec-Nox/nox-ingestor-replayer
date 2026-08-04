@@ -4,7 +4,7 @@ use axum::{
     Json,
     extract::{Query, State},
     http::{StatusCode, Uri},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
 use axum_prometheus::metrics::counter;
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
@@ -15,6 +15,7 @@ use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
+use crate::metrics;
 use crate::replay::{
     ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
 };
@@ -106,6 +107,21 @@ pub(crate) async fn replay(
     Query(query): Query<ChainQuery>,
     headers: axum::http::HeaderMap,
     Json(body): Json<ReplayBody>,
+) -> Response {
+    let result = replay_inner(state, query, headers, body).await;
+    let outcome = result.as_ref().map_or_else(ReplayError::kind, |_| "ok");
+    counter!(metrics::REPLAY_REQUESTS_TOTAL, "outcome" => outcome).increment(1);
+    match result {
+        Ok(accepted) => accepted.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn replay_inner(
+    state: AppState,
+    query: ChainQuery,
+    headers: axum::http::HeaderMap,
+    body: ReplayBody,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
     check_api_key(&headers, &state.replay.api_key)?;
     let chain_id: u32 = query.parse_chain_id()?.ok_or(ReplayError::MissingChainId)?;
@@ -173,8 +189,6 @@ pub(crate) async fn replay(
         .replay_task
         .lock()
         .expect("replay_task mutex poisoned") = Some(handle);
-
-    counter!("nox_replayer.replay.requests_total", "outcome" => "ok").increment(1);
 
     Ok((
         StatusCode::ACCEPTED,
