@@ -11,6 +11,7 @@ use tracing::{debug, warn};
 use crate::config::NatsConfig;
 use crate::error::NatsError;
 use crate::events::TransactionMessage;
+use crate::metrics;
 
 use super::client::NatsClient;
 
@@ -81,7 +82,7 @@ impl Publisher {
                 Ok(outcome) => return Ok(outcome),
                 Err(e) if Self::should_retry(&e, attempt, self.publish_max_retries) => {
                     attempt += 1;
-                    counter!("nox_replayer.nats.publish_retries_total").increment(1);
+                    counter!(metrics::NATS_PUBLISH_RETRIES_TOTAL).increment(1);
                     warn!(
                         attempt,
                         max_retries = self.publish_max_retries,
