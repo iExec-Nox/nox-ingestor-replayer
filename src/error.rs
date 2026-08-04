@@ -4,7 +4,6 @@ use async_nats::jetstream::context::PublishErrorKind;
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum_prometheus::metrics::counter;
 use serde_json::json;
 use thiserror::Error;
 use tracing::warn;
@@ -142,7 +141,7 @@ impl ReplayError {
 
 impl ReplayError {
     /// Short, stable label for the `requests_total{outcome=...}` metric
-    fn kind(&self) -> &'static str {
+    pub(crate) fn kind(&self) -> &'static str {
         match self {
             ReplayError::Unauthorized => "unauthorized",
             ReplayError::InvalidRange => "invalid_range",
@@ -178,8 +177,6 @@ impl IntoResponse for ReplayError {
         }
 
         let body = self.body();
-
-        counter!("nox_replayer.replay.requests_total", "outcome" => self.kind()).increment(1);
 
         (status, Json(body)).into_response()
     }
