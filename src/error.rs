@@ -137,9 +137,7 @@ impl ReplayError {
                 | ReplayError::Rpc { .. }
         )
     }
-}
 
-impl ReplayError {
     /// Short, stable label for the `requests_total{outcome=...}` metric
     pub(crate) fn kind(&self) -> &'static str {
         match self {
