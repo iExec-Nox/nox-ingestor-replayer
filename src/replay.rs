@@ -130,34 +130,47 @@ pub(crate) struct ReplayAccepted {
     pub(crate) accepted_at: DateTime<Utc>,
 }
 
-/// Increments the per-chain `jobs_in_flight` gauge on construction and
-/// decrements it on drop, keeping the gauge correct across early returns and panics.
-struct InFlightGuard {
-    gauge: Gauge,
+/// Concurrency slot for a running replay job: the per-chain and global
+/// semaphore permits plus the `jobs_in_flight` gauge, acquired together at
+/// the handler's permit-acquisition site and released together on drop — so
+/// the gauge's lifetime always matches permit ownership instead of lagging
+/// behind into the spawned task.
+pub(crate) struct JobSlot {
+    _chain_permit: OwnedSemaphorePermit,
+    _global_permit: OwnedSemaphorePermit,
+    in_flight: Gauge,
 }
 
-impl InFlightGuard {
-    fn new(gauge: Gauge) -> Self {
-        gauge.increment(1.0);
-        Self { gauge }
+impl JobSlot {
+    pub(crate) fn new(
+        chain_permit: OwnedSemaphorePermit,
+        global_permit: OwnedSemaphorePermit,
+        in_flight: Gauge,
+    ) -> Self {
+        in_flight.increment(1.0);
+        Self {
+            _chain_permit: chain_permit,
+            _global_permit: global_permit,
+            in_flight,
+        }
     }
 }
 
-impl Drop for InFlightGuard {
+impl Drop for JobSlot {
     fn drop(&mut self) {
-        self.gauge.decrement(1.0);
+        self.in_flight.decrement(1.0);
     }
 }
 
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
-/// `hold` is held for the lifetime of the job and dropped (releasing the
-/// per-chain and global permits it wraps) when this function returns.
+/// `job_slot` is held for the lifetime of the job and dropped (releasing the
+/// permits and decrementing `jobs_in_flight`) when this function returns.
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
     shutdown: watch::Receiver<bool>,
-    hold: (OwnedSemaphorePermit, OwnedSemaphorePermit),
+    job_slot: JobSlot,
     status: Arc<RwLock<ReplayJobStatus>>,
     from_block: u64,
     to_block: u64,
@@ -182,9 +195,6 @@ pub(crate) async fn run_replay_job(
     // absent until a chain publishes, so a replay-lag panel never reads block `0`.
     let mut last_published_block: Option<Gauge> = None;
 
-    let _in_flight = InFlightGuard::new(
-        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => chain_id.clone()),
-    );
     let start = Instant::now();
     let mut progress = ReplayProgress {
         current_block: from_block,
@@ -304,6 +314,7 @@ pub(crate) async fn run_replay_job(
     )
     .record(start.elapsed().as_secs_f64());
 
-    // Release the held permit(s) now that the terminal status has been written to the slot.
-    drop(hold);
+    // Release the concurrency slot (permits + in-flight gauge) now that the
+    // terminal status has been written.
+    drop(job_slot);
 }
