@@ -122,7 +122,7 @@ impl ReplayError {
             ReplayError::MissingChainId | ReplayError::InvalidChainId { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            ReplayError::AtCapacity { .. } => StatusCode::TOO_MANY_REQUESTS,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
         }
