@@ -6,7 +6,7 @@ use axum::{
     http::{StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use axum_prometheus::metrics::counter;
+use axum_prometheus::metrics::{counter, gauge};
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -17,7 +17,7 @@ use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
 use crate::metrics;
 use crate::replay::{
-    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
+    ChainQuery, JobSlot, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
 };
 
 /// Health check endpoint handler.
@@ -156,6 +156,12 @@ async fn replay_inner(
             max: state.replay.max_concurrent_replay_jobs,
         })?;
 
+    let job_slot = JobSlot::new(
+        chain_permit,
+        global_permit,
+        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => req.chain_id.to_string()),
+    );
+
     if !pipeline.publisher.is_connected() {
         return Err(ReplayError::Nats {
             chain_id: req.chain_id,
@@ -179,7 +185,7 @@ async fn replay_inner(
         pipeline.reader.clone(),
         pipeline.publisher.clone(),
         state.shutdown.clone(),
-        (chain_permit, global_permit),
+        job_slot,
         pipeline.job_status.clone(),
         req.range.from_block,
         req.range.to_block,
