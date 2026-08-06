@@ -162,25 +162,28 @@ pub(crate) async fn run_replay_job(
     from_block: u64,
     to_block: u64,
 ) {
-    let cid = source.chain_id().to_string();
+    let chain_id = source.chain_id().to_string();
 
     // Resolve each per-chain metric handle once per job instead of re-resolving
     // (label alloc + registry lookup) on every batch and transaction.
-    let blocks_read = counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => cid.clone());
-    let rpc_errors = counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone());
-    let rpc_read = histogram!(metrics::REPLAY_RPC_READ_SECONDS, metrics::CHAIN_ID => cid.clone());
-    let transactions_published =
-        counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => cid.clone());
-    let events = counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => cid.clone());
-    let duplicates = counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => cid.clone());
+    let blocks_read =
+        counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let rpc_errors =
+        counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let rpc_read =
+        histogram!(metrics::REPLAY_RPC_READ_SECONDS, metrics::CHAIN_ID => chain_id.clone());
+    let transactions_published = counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let events = counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let duplicates =
+        counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => chain_id.clone());
     let publish_errors =
-        counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => cid.clone());
+        counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
     // Resolved lazily on the first successful publish: this gauge is deliberately
     // absent until a chain publishes, so a replay-lag panel never reads block `0`.
     let mut last_published_block: Option<Gauge> = None;
 
     let _in_flight = InFlightGuard::new(
-        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => cid.clone()),
+        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => chain_id.clone()),
     );
     let start = Instant::now();
     let mut progress = ReplayProgress {
@@ -241,7 +244,7 @@ pub(crate) async fn run_replay_job(
                     events.increment(tx.events.len() as u64);
                     last_published_block
                         .get_or_insert_with(|| {
-                            gauge!(metrics::REPLAY_LAST_PUBLISHED_BLOCK, metrics::CHAIN_ID => cid.clone())
+                            gauge!(metrics::REPLAY_LAST_PUBLISHED_BLOCK, metrics::CHAIN_ID => chain_id.clone())
                         })
                         .set(tx.block_number as f64);
                     if outcome.duplicate {
@@ -296,7 +299,7 @@ pub(crate) async fn run_replay_job(
     };
     histogram!(
         metrics::REPLAY_JOB_DURATION_SECONDS,
-        metrics::CHAIN_ID => cid,
+        metrics::CHAIN_ID => chain_id,
         "result" => result,
     )
     .record(start.elapsed().as_secs_f64());
