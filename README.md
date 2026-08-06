@@ -150,7 +150,7 @@ Prometheus metrics endpoint for observability.
 
 **Response:** Prometheus text format metrics.
 
-In addition to the per-route HTTP request metrics emitted automatically by the middleware layer (`axum_http_requests_*`), the service exports the following application metrics. Dots in the source names render as underscores in the Prometheus text format (e.g. `nox_replayer_nats_connection_state`). All per-chain counters and gauges are pre-registered at startup, so each series is present (at `0`) before its first event, except `nox_replayer_replay_last_published_block`, which stays absent until a chain's first successful publish (block `0` would falsely assert that block was published; query it with `absent()`/`OR on()` in dashboards).
+In addition to the per-route HTTP request metrics emitted automatically by the middleware layer (`axum_http_requests_*`), the service exports the following application metrics. Names match the Prometheus text format exactly, in source and here. All per-chain counters and gauges are pre-registered at startup, so each series is present (at `0`) before its first event, except `nox_replayer_replay_last_published_block`, which stays absent until a chain's first successful publish (block `0` would falsely assert that block was published; query it with `absent()`/`OR on()` in dashboards).
 
 **NATS**
 
