@@ -166,15 +166,13 @@ In addition to the per-route HTTP request metrics emitted automatically by the m
 | --- | --- | --- |
 | `nox_replayer_replay_requests_total` | counter | `POST /replay` responses by `outcome` label: `ok` on accept, otherwise the error kind (`unauthorized`, `missing_chain_id`, `invalid_chain_id`, `invalid_range`, `range_beyond_head`, `chain_busy`, `chain_not_configured`, `at_capacity`, `rpc_error`, `nats_error`). Not labeled by `chain_id`. |
 | `nox_replayer_replay_jobs_in_flight` | gauge | Replay jobs currently running. |
+| `nox_replayer_replay_jobs_duration_seconds` | histogram | Wall-clock duration of a replay job, labeled by `chain_id` and terminal `result` (`completed`, `shutdown`, `rpc_error`, `nats_error`). |
 | `nox_replayer_replay_blocks_read_total` | counter | Blocks read from RPC. |
-| `nox_replayer_replay_transactions_published_total` | counter | Transactions published to NATS. |
-| `nox_replayer_replay_events_total` | counter | Events published to NATS. |
-| `nox_replayer_replay_duplicates_total` | counter | Publishes JetStream deduplicated (already stored). |
 | `nox_replayer_replay_rpc_errors_total` | counter | Batch reads that failed against the RPC endpoint. |
-| `nox_replayer_replay_publish_errors_total` | counter | Publishes that failed after exhausting retries. |
+| `nox_replayer_replay_rpc_reads_seconds` | histogram | Latency of each bounded batch read from RPC. |
+| `nox_replayer_replay_publish_requests_total` | counter | Publish attempts to NATS by `outcome` label: `success` (newly published), `duplicate` (JetStream deduplicated, already stored), `failure` (failed after exhausting retries). |
+| `nox_replayer_replay_events_total` | counter | Events published to NATS. |
 | `nox_replayer_replay_last_published_block` | gauge | Block number of the most recent successful publish. Absent until that chain's first successful publish. |
-| `nox_replayer_replay_rpc_read_seconds` | histogram | Latency of each bounded batch read from RPC. |
-| `nox_replayer_replay_job_duration_seconds` | histogram | Wall-clock duration of a replay job, labeled by `chain_id` and terminal `result` (`completed`, `shutdown`, `rpc_error`, `nats_error`). |
 
 **Build**
 
