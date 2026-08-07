@@ -160,11 +160,14 @@ In addition to the per-route HTTP request metrics emitted automatically by the m
 | `nox_replayer_nats_reconnects_total` | counter | Reconnections after the initial connect (the first connect is not counted). |
 | `nox_replayer_nats_publish_retries_total` | counter | Transient publish failures that were retried. |
 
-**Replay**: all labeled by `chain_id` unless noted.
+**Replay**
+
+> [!NOTE]
+> All metrics below are labeled by `chain_id`, except `nox_replayer_replay_requests_total`.
 
 | Metric | Type | Description |
 | --- | --- | --- |
-| `nox_replayer_replay_requests_total` | counter | `POST /replay` responses by `outcome` label: `ok` on accept, otherwise the error kind (`unauthorized`, `missing_chain_id`, `invalid_chain_id`, `invalid_range`, `range_beyond_head`, `chain_busy`, `chain_not_configured`, `at_capacity`, `rpc_error`, `nats_error`). Not labeled by `chain_id`. |
+| `nox_replayer_replay_requests_total` | counter | `POST /replay` responses by `outcome` label: `ok` on accept, otherwise the error kind (`unauthorized`, `missing_chain_id`, `invalid_chain_id`, `invalid_range`, `range_beyond_head`, `chain_busy`, `chain_not_configured`, `at_capacity`, `rpc_error`, `nats_error`). |
 | `nox_replayer_replay_jobs_in_flight` | gauge | Replay jobs currently running. |
 | `nox_replayer_replay_jobs_duration_seconds` | histogram | Wall-clock duration of a replay job, labeled by `chain_id` and terminal `result` (`completed`, `shutdown`, `rpc_error`, `nats_error`). |
 | `nox_replayer_replay_blocks_read_total` | counter | Blocks read from RPC. |
