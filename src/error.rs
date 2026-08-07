@@ -170,7 +170,7 @@ impl IntoResponse for ReplayError {
     fn into_response(self) -> Response {
         let status = self.status();
 
-        if status.is_server_error() {
+        if status.is_server_error() || status.is_client_error() {
             warn!(error = %self, status = %status, "replay request failed");
         }
 
