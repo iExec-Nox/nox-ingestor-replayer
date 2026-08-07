@@ -184,13 +184,11 @@ pub(crate) async fn run_replay_job(
     let rpc_errors =
         counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
     let rpc_read =
-        histogram!(metrics::REPLAY_RPC_READ_SECONDS, metrics::CHAIN_ID => chain_id.clone());
-    let transactions_published = counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+        histogram!(metrics::REPLAY_RPC_READS_SECONDS, metrics::CHAIN_ID => chain_id.clone());
+    let publish_success = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "success");
+    let publish_duplicate = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "duplicate");
+    let publish_failure = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "failure");
     let events = counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
-    let duplicates =
-        counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => chain_id.clone());
-    let publish_errors =
-        counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
     // Resolved lazily on the first successful publish: this gauge is deliberately
     // absent until a chain publishes, so a replay-lag panel never reads block `0`.
     let mut last_published_block: Option<Gauge> = None;
@@ -250,7 +248,6 @@ pub(crate) async fn run_replay_job(
                     }
                     progress.transactions_published += 1;
                     progress.events_total += tx.events.len() as u64;
-                    transactions_published.increment(1);
                     events.increment(tx.events.len() as u64);
                     last_published_block
                         .get_or_insert_with(|| {
@@ -259,11 +256,13 @@ pub(crate) async fn run_replay_job(
                         .set(tx.block_number as f64);
                     if outcome.duplicate {
                         progress.duplicates += 1;
-                        duplicates.increment(1);
+                        publish_duplicate.increment(1);
+                    } else {
+                        publish_success.increment(1);
                     }
                 }
                 Err(e) => {
-                    publish_errors.increment(1);
+                    publish_failure.increment(1);
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
                     stop_reason = Some(StopReason::NatsError);
                     // Resume from the failed block; already-acked blocks are not re-read.
@@ -308,7 +307,7 @@ pub(crate) async fn run_replay_job(
         Some(StopReason::NatsError) => "nats_error",
     };
     histogram!(
-        metrics::REPLAY_JOB_DURATION_SECONDS,
+        metrics::REPLAY_JOBS_DURATION_SECONDS,
         metrics::CHAIN_ID => chain_id,
         "result" => result,
     )
