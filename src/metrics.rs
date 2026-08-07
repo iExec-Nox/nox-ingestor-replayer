@@ -16,14 +16,11 @@ pub(crate) const BUILD_INFO: &str = "nox_replayer_build_info";
 
 // Replay
 pub(crate) const REPLAY_BLOCKS_READ_TOTAL: &str = "nox_replayer_replay_blocks_read_total";
-pub(crate) const REPLAY_DUPLICATES_TOTAL: &str = "nox_replayer_replay_duplicates_total";
 pub(crate) const REPLAY_EVENTS_TOTAL: &str = "nox_replayer_replay_events_total";
 pub(crate) const REPLAY_JOBS_IN_FLIGHT: &str = "nox_replayer_replay_jobs_in_flight";
-pub(crate) const REPLAY_JOB_DURATION_SECONDS: &str = "nox_replayer_replay_job_duration_seconds";
+pub(crate) const REPLAY_JOBS_DURATION_SECONDS: &str = "nox_replayer_replay_jobs_duration_seconds";
 pub(crate) const REPLAY_LAST_PUBLISHED_BLOCK: &str = "nox_replayer_replay_last_published_block";
-pub(crate) const REPLAY_PUBLISH_ERRORS_TOTAL: &str = "nox_replayer_replay_publish_errors_total";
+pub(crate) const REPLAY_PUBLISH_REQUESTS_TOTAL: &str = "nox_replayer_replay_publish_requests_total";
 pub(crate) const REPLAY_REQUESTS_TOTAL: &str = "nox_replayer_replay_requests_total";
 pub(crate) const REPLAY_RPC_ERRORS_TOTAL: &str = "nox_replayer_replay_rpc_errors_total";
-pub(crate) const REPLAY_RPC_READ_SECONDS: &str = "nox_replayer_replay_rpc_read_seconds";
-pub(crate) const REPLAY_TRANSACTIONS_PUBLISHED_TOTAL: &str =
-    "nox_replayer_replay_transactions_published_total";
+pub(crate) const REPLAY_RPC_READS_SECONDS: &str = "nox_replayer_replay_rpc_reads_seconds";
