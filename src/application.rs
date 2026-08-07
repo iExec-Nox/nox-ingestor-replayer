@@ -66,17 +66,17 @@ impl Application {
         gauge!(metrics::BUILD_INFO, "version" => env!("CARGO_PKG_VERSION")).set(1.0);
         for chain_id in self.config.chains.keys() {
             let chain_id = chain_id.to_string();
-            counter!(metrics::REPLAY_TRANSACTIONS_PUBLISHED_TOTAL, metrics::CHAIN_ID => chain_id.clone())
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "success")
+                .absolute(0);
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "duplicate")
+                .absolute(0);
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "failure")
                 .absolute(0);
             counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => chain_id.clone())
-                .absolute(0);
-            counter!(metrics::REPLAY_DUPLICATES_TOTAL, metrics::CHAIN_ID => chain_id.clone())
                 .absolute(0);
             counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => chain_id.clone())
                 .absolute(0);
             counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone())
-                .absolute(0);
-            counter!(metrics::REPLAY_PUBLISH_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone())
                 .absolute(0);
             gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => chain_id).set(0.0);
         }
