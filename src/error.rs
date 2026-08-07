@@ -117,12 +117,12 @@ impl ReplayError {
             ReplayError::InvalidRange | ReplayError::RangeBeyondHead { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
+            ReplayError::ChainBusy { .. } => StatusCode::TOO_MANY_REQUESTS,
             ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
             ReplayError::MissingChainId | ReplayError::InvalidChainId { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::AtCapacity { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            ReplayError::AtCapacity { .. } => StatusCode::TOO_MANY_REQUESTS,
             ReplayError::Nats { .. } => StatusCode::SERVICE_UNAVAILABLE,
             ReplayError::Rpc { .. } => StatusCode::BAD_GATEWAY,
         }
@@ -137,9 +137,23 @@ impl ReplayError {
                 | ReplayError::Rpc { .. }
         )
     }
-}
 
-impl ReplayError {
+    /// Short, stable label for the `requests_total{outcome=...}` metric
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            ReplayError::Unauthorized => "unauthorized",
+            ReplayError::InvalidRange => "invalid_range",
+            ReplayError::RangeBeyondHead { .. } => "range_beyond_head",
+            ReplayError::ChainBusy { .. } => "chain_busy",
+            ReplayError::ChainNotConfigured { .. } => "chain_not_configured",
+            ReplayError::MissingChainId => "missing_chain_id",
+            ReplayError::InvalidChainId { .. } => "invalid_chain_id",
+            ReplayError::AtCapacity { .. } => "at_capacity",
+            ReplayError::Rpc { .. } => "rpc_error",
+            ReplayError::Nats { .. } => "nats_error",
+        }
+    }
+
     /// Render the JSON error envelope (`{"error": {message, retryable}}`) for
     /// reuse by handlers that choose their own status code.
     pub(crate) fn body(&self) -> serde_json::Value {
@@ -156,7 +170,7 @@ impl IntoResponse for ReplayError {
     fn into_response(self) -> Response {
         let status = self.status();
 
-        if status.is_server_error() {
+        if status.is_server_error() || status.is_client_error() {
             warn!(error = %self, status = %status, "replay request failed");
         }
 

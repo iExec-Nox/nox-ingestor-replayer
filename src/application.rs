@@ -10,6 +10,7 @@ use axum::{
 };
 use axum_prometheus::{
     Handle, MakeDefaultHandle, PrometheusMetricLayerBuilder,
+    metrics::{counter, gauge},
     metrics_exporter_prometheus::PrometheusHandle,
 };
 use tokio::signal;
@@ -20,6 +21,7 @@ use tracing::{debug, info, warn};
 use crate::chain::{BlockReader, ChainClient, ChainPipeline, ChainRegistry, NoxEventParser};
 use crate::config::{Config, ReplayConfig};
 use crate::handlers;
+use crate::metrics;
 use crate::nats::{NatsClient, Publisher};
 
 /// Grace period to await an in-flight replay job before the NATS connection
@@ -53,6 +55,32 @@ impl Application {
         debug!("Starting ingestor replayer");
         debug!("Config: {:?}", self.config);
 
+        let prometheus_layer = PrometheusMetricLayerBuilder::new()
+            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
+            .build();
+        let metrics_handle = Handle::make_default_handle(Handle::default());
+
+        gauge!(metrics::NATS_CONNECTION_STATE).set(0.0);
+        counter!(metrics::NATS_RECONNECTS_TOTAL).absolute(0);
+        counter!(metrics::NATS_PUBLISH_RETRIES_TOTAL).absolute(0);
+        gauge!(metrics::BUILD_INFO, "version" => env!("CARGO_PKG_VERSION")).set(1.0);
+        for chain_id in self.config.chains.keys() {
+            let chain_id = chain_id.to_string();
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "success")
+                .absolute(0);
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "duplicate")
+                .absolute(0);
+            counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "failure")
+                .absolute(0);
+            counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => chain_id.clone())
+                .absolute(0);
+            counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => chain_id.clone())
+                .absolute(0);
+            counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone())
+                .absolute(0);
+            gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => chain_id).set(0.0);
+        }
+
         let nats_client = Arc::new(NatsClient::connect(&self.config.nats).await?);
         nats_client.setup_stream(&self.config.nats).await?;
 
@@ -74,11 +102,6 @@ impl Application {
             pipelines,
             self.config.replay.max_concurrent_replay_jobs,
         ));
-
-        let prometheus_layer = PrometheusMetricLayerBuilder::new()
-            .with_allow_patterns(&["/", "/health", "/metrics", "/replay", "/replay/status"])
-            .build();
-        let metrics_handle = Handle::make_default_handle(Handle::default());
 
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 

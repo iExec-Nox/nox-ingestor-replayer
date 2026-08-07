@@ -4,8 +4,9 @@ use axum::{
     Json,
     extract::{Query, State},
     http::{StatusCode, Uri},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
 };
+use axum_prometheus::metrics::{counter, gauge};
 use axum_prometheus::metrics_exporter_prometheus::PrometheusHandle;
 use chrono::Utc;
 use serde_json::{Value, json};
@@ -14,8 +15,9 @@ use subtle::ConstantTimeEq;
 
 use crate::application::AppState;
 use crate::error::{NatsError, ReplayError};
+use crate::metrics;
 use crate::replay::{
-    ChainQuery, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
+    ChainQuery, JobSlot, ReplayAccepted, ReplayBody, ReplayJobStatus, ReplayRequest, run_replay_job,
 };
 
 /// Health check endpoint handler.
@@ -105,6 +107,21 @@ pub(crate) async fn replay(
     Query(query): Query<ChainQuery>,
     headers: axum::http::HeaderMap,
     Json(body): Json<ReplayBody>,
+) -> Response {
+    let result = replay_inner(state, query, headers, body).await;
+    let outcome = result.as_ref().map_or_else(ReplayError::kind, |_| "ok");
+    counter!(metrics::REPLAY_REQUESTS_TOTAL, "outcome" => outcome).increment(1);
+    match result {
+        Ok(accepted) => accepted.into_response(),
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn replay_inner(
+    state: AppState,
+    query: ChainQuery,
+    headers: axum::http::HeaderMap,
+    body: ReplayBody,
 ) -> Result<(StatusCode, Json<ReplayAccepted>), ReplayError> {
     check_api_key(&headers, &state.replay.api_key)?;
     let chain_id: u32 = query.parse_chain_id()?.ok_or(ReplayError::MissingChainId)?;
@@ -139,6 +156,12 @@ pub(crate) async fn replay(
             max: state.replay.max_concurrent_replay_jobs,
         })?;
 
+    let job_slot = JobSlot::new(
+        chain_permit,
+        global_permit,
+        gauge!(metrics::REPLAY_JOBS_IN_FLIGHT, metrics::CHAIN_ID => req.chain_id.to_string()),
+    );
+
     if !pipeline.publisher.is_connected() {
         return Err(ReplayError::Nats {
             chain_id: req.chain_id,
@@ -162,7 +185,7 @@ pub(crate) async fn replay(
         pipeline.reader.clone(),
         pipeline.publisher.clone(),
         state.shutdown.clone(),
-        (chain_permit, global_permit),
+        job_slot,
         pipeline.job_status.clone(),
         req.range.from_block,
         req.range.to_block,

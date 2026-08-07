@@ -2,6 +2,7 @@
 
 use async_nats::HeaderMap;
 use async_nats::jetstream::Context as JetStreamContext;
+use axum_prometheus::metrics::counter;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -10,6 +11,7 @@ use tracing::{debug, warn};
 use crate::config::NatsConfig;
 use crate::error::NatsError;
 use crate::events::TransactionMessage;
+use crate::metrics;
 
 use super::client::NatsClient;
 
@@ -80,6 +82,7 @@ impl Publisher {
                 Ok(outcome) => return Ok(outcome),
                 Err(e) if Self::should_retry(&e, attempt, self.publish_max_retries) => {
                     attempt += 1;
+                    counter!(metrics::NATS_PUBLISH_RETRIES_TOTAL).increment(1);
                     warn!(
                         attempt,
                         max_retries = self.publish_max_retries,

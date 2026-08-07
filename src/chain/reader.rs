@@ -134,6 +134,11 @@ impl BlockReader {
         self.batch_size
     }
 
+    /// Returns the chain id this reader serves (the reader's owning key in the registry).
+    pub(crate) fn chain_id(&self) -> u32 {
+        self.chain_id
+    }
+
     /// Group events by transaction hash
     fn group_by_transaction(
         &self,

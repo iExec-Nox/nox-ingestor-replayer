@@ -11,6 +11,7 @@ pub mod config;
 pub mod error;
 pub mod events;
 pub mod handlers;
+pub mod metrics;
 pub mod nats;
 pub mod replay;
 

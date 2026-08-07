@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum_prometheus::metrics::{Gauge, counter, gauge, histogram};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{OwnedSemaphorePermit, RwLock, watch};
@@ -11,6 +12,7 @@ use tracing::warn;
 use crate::chain::BlockReader;
 use crate::error::ReplayError;
 use crate::events::log_event;
+use crate::metrics;
 use crate::nats::Publisher;
 
 /// Lifecycle state of the single replay job slot.
@@ -50,6 +52,10 @@ pub(crate) struct ReplayJobStatus {
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct ReplayProgress {
     pub(crate) current_block: u64,
+    /// Transactions handled so far: success + duplicate (unlike the
+    /// `outcome`-labeled publish metric, this is job progress through the
+    /// block range, not a per-outcome count). Subtract `duplicates` for the
+    /// success-only count.
     pub(crate) transactions_published: u64,
     pub(crate) events_total: u64,
     pub(crate) duplicates: u64,
@@ -128,19 +134,69 @@ pub(crate) struct ReplayAccepted {
     pub(crate) accepted_at: DateTime<Utc>,
 }
 
+/// Concurrency slot for a running replay job: the per-chain and global
+/// semaphore permits plus the `jobs_in_flight` gauge, acquired together at
+/// the handler's permit-acquisition site and released together on drop — so
+/// the gauge's lifetime always matches permit ownership instead of lagging
+/// behind into the spawned task.
+pub(crate) struct JobSlot {
+    _chain_permit: OwnedSemaphorePermit,
+    _global_permit: OwnedSemaphorePermit,
+    in_flight: Gauge,
+}
+
+impl JobSlot {
+    pub(crate) fn new(
+        chain_permit: OwnedSemaphorePermit,
+        global_permit: OwnedSemaphorePermit,
+        in_flight: Gauge,
+    ) -> Self {
+        in_flight.increment(1.0);
+        Self {
+            _chain_permit: chain_permit,
+            _global_permit: global_permit,
+            in_flight,
+        }
+    }
+}
+
+impl Drop for JobSlot {
+    fn drop(&mut self) {
+        self.in_flight.decrement(1.0);
+    }
+}
+
 /// Run a replay job to completion, writing progress into `status` as it goes.
 ///
-/// `hold` is held for the lifetime of the job and dropped (releasing the
-/// per-chain and global permits it wraps) when this function returns.
+/// `job_slot` is held for the lifetime of the job and dropped (releasing the
+/// permits and decrementing `jobs_in_flight`) when this function returns.
 pub(crate) async fn run_replay_job(
     source: Arc<BlockReader>,
     sink: Arc<Publisher>,
     shutdown: watch::Receiver<bool>,
-    hold: (OwnedSemaphorePermit, OwnedSemaphorePermit),
+    job_slot: JobSlot,
     status: Arc<RwLock<ReplayJobStatus>>,
     from_block: u64,
     to_block: u64,
 ) {
+    let chain_id = source.chain_id().to_string();
+
+    // Resolve each per-chain metric handle once per job instead of re-resolving
+    // (label alloc + registry lookup) on every batch and transaction.
+    let blocks_read =
+        counter!(metrics::REPLAY_BLOCKS_READ_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let rpc_errors =
+        counter!(metrics::REPLAY_RPC_ERRORS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    let rpc_read =
+        histogram!(metrics::REPLAY_RPC_READS_SECONDS, metrics::CHAIN_ID => chain_id.clone());
+    let publish_success = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "success");
+    let publish_duplicate = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "duplicate");
+    let publish_failure = counter!(metrics::REPLAY_PUBLISH_REQUESTS_TOTAL, metrics::CHAIN_ID => chain_id.clone(), "outcome" => "failure");
+    let events = counter!(metrics::REPLAY_EVENTS_TOTAL, metrics::CHAIN_ID => chain_id.clone());
+    // Resolved lazily on the first successful publish: this gauge is deliberately
+    // absent until a chain publishes, so a replay-lag panel never reads block `0`.
+    let mut last_published_block: Option<Gauge> = None;
+
     let start = Instant::now();
     let mut progress = ReplayProgress {
         current_block: from_block,
@@ -162,9 +218,15 @@ pub(crate) async fn run_replay_job(
             .saturating_add(source.batch_size().saturating_sub(1))
             .min(to_block);
 
+        let read_start = Instant::now();
         let batch = match source.read_batch_bounded(current, batch_to).await {
-            Ok(batch) => batch,
+            Ok(batch) => {
+                rpc_read.record(read_start.elapsed().as_secs_f64());
+                blocks_read.increment(batch_to - current + 1);
+                batch
+            }
             Err(e) => {
+                rpc_errors.increment(1);
                 warn!(from = current, to = batch_to, error = %e, "replay stopped: batch read failed");
                 stop_reason = Some(StopReason::RpcError);
                 resume_from = current;
@@ -190,11 +252,21 @@ pub(crate) async fn run_replay_job(
                     }
                     progress.transactions_published += 1;
                     progress.events_total += tx.events.len() as u64;
+                    events.increment(tx.events.len() as u64);
+                    last_published_block
+                        .get_or_insert_with(|| {
+                            gauge!(metrics::REPLAY_LAST_PUBLISHED_BLOCK, metrics::CHAIN_ID => chain_id.clone())
+                        })
+                        .set(tx.block_number as f64);
                     if outcome.duplicate {
                         progress.duplicates += 1;
+                        publish_duplicate.increment(1);
+                    } else {
+                        publish_success.increment(1);
                     }
                 }
                 Err(e) => {
+                    publish_failure.increment(1);
                     warn!(block = tx.block_number, error = %e, "replay stopped: publish failed");
                     stop_reason = Some(StopReason::NatsError);
                     // Resume from the failed block; already-acked blocks are not re-read.
@@ -232,6 +304,20 @@ pub(crate) async fn run_replay_job(
 
     drop(slot);
 
-    // Release the held permit(s) now that the terminal status has been written to the slot.
-    drop(hold);
+    let result = match stop_reason {
+        None | Some(StopReason::Completed) => "completed",
+        Some(StopReason::ShutdownSignal) => "shutdown",
+        Some(StopReason::RpcError) => "rpc_error",
+        Some(StopReason::NatsError) => "nats_error",
+    };
+    histogram!(
+        metrics::REPLAY_JOBS_DURATION_SECONDS,
+        metrics::CHAIN_ID => chain_id,
+        "result" => result,
+    )
+    .record(start.elapsed().as_secs_f64());
+
+    // Release the concurrency slot (permits + in-flight gauge) now that the
+    // terminal status has been written.
+    drop(job_slot);
 }

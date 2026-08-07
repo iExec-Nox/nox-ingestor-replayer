@@ -5,12 +5,15 @@ use async_nats::rustls::pki_types::pem::PemObject;
 use async_nats::rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use async_nats::rustls::{ClientConfig, RootCertStore};
 use async_nats::{ConnectOptions, Event};
+use axum_prometheus::metrics::{counter, gauge};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::watch;
 use tracing::{error, info, warn};
 
 use crate::config::{NatsConfig, TlsConfig};
 use crate::error::NatsError;
+use crate::metrics;
 
 /// Connection state for NATS client
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +46,10 @@ impl NatsClient {
         let reconnect_delay = config.reconnect_delay;
         let max_reconnect_delay = config.max_reconnect_delay;
 
+        // The first `Connected` event is the initial handshake, not a reconnect;
+        // only subsequent `Connected` events increment `reconnects_total`.
+        let seen_connect = Arc::new(AtomicBool::new(false));
+
         let mut options = ConnectOptions::new()
             .reconnect_delay_callback(move |attempts| {
                 let exponent = u32::try_from(attempts).unwrap_or(u32::MAX).min(32);
@@ -52,25 +59,34 @@ impl NatsClient {
                     .unwrap_or(max_reconnect_delay)
                     .min(max_reconnect_delay)
             })
-            .event_callback(move |event| {
-                let state_tx = state_tx_clone.clone();
-                async move {
-                    match event {
-                        Event::Connected => {
-                            info!("NATS connected");
-                            let _ = state_tx.send(ConnectionState::Connected);
+            .event_callback({
+                let seen_connect = Arc::clone(&seen_connect);
+                move |event| {
+                    let state_tx = state_tx_clone.clone();
+                    let seen_connect = Arc::clone(&seen_connect);
+                    async move {
+                        match event {
+                            Event::Connected => {
+                                info!("NATS connected");
+                                let _ = state_tx.send(ConnectionState::Connected);
+                                gauge!(metrics::NATS_CONNECTION_STATE).set(1.0);
+                                if seen_connect.swap(true, Ordering::Relaxed) {
+                                    counter!(metrics::NATS_RECONNECTS_TOTAL).increment(1);
+                                }
+                            }
+                            Event::Disconnected => {
+                                warn!("NATS disconnected");
+                                let _ = state_tx.send(ConnectionState::Disconnected);
+                                gauge!(metrics::NATS_CONNECTION_STATE).set(0.0);
+                            }
+                            Event::ServerError(err) => error!(error = %err, "NATS server error"),
+                            Event::ClientError(err) => error!(error = %err, "NATS client error"),
+                            Event::LameDuckMode => warn!("NATS server in lame duck mode"),
+                            Event::SlowConsumer(sid) => {
+                                warn!(subscription_id = sid, "NATS slow consumer")
+                            }
+                            _ => {}
                         }
-                        Event::Disconnected => {
-                            warn!("NATS disconnected");
-                            let _ = state_tx.send(ConnectionState::Disconnected);
-                        }
-                        Event::ServerError(err) => error!(error = %err, "NATS server error"),
-                        Event::ClientError(err) => error!(error = %err, "NATS client error"),
-                        Event::LameDuckMode => warn!("NATS server in lame duck mode"),
-                        Event::SlowConsumer(sid) => {
-                            warn!(subscription_id = sid, "NATS slow consumer")
-                        }
-                        _ => {}
                     }
                 }
             })
