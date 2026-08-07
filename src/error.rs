@@ -117,7 +117,7 @@ impl ReplayError {
             ReplayError::InvalidRange | ReplayError::RangeBeyondHead { .. } => {
                 StatusCode::BAD_REQUEST
             }
-            ReplayError::ChainBusy { .. } => StatusCode::CONFLICT,
+            ReplayError::ChainBusy { .. } => StatusCode::TOO_MANY_REQUESTS,
             ReplayError::ChainNotConfigured { .. } => StatusCode::BAD_REQUEST,
             ReplayError::MissingChainId | ReplayError::InvalidChainId { .. } => {
                 StatusCode::BAD_REQUEST
