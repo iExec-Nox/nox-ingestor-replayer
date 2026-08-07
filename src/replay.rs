@@ -52,6 +52,10 @@ pub(crate) struct ReplayJobStatus {
 #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize)]
 pub(crate) struct ReplayProgress {
     pub(crate) current_block: u64,
+    /// Transactions handled so far: success + duplicate (unlike the
+    /// `outcome`-labeled publish metric, this is job progress through the
+    /// block range, not a per-outcome count). Subtract `duplicates` for the
+    /// success-only count.
     pub(crate) transactions_published: u64,
     pub(crate) events_total: u64,
     pub(crate) duplicates: u64,
