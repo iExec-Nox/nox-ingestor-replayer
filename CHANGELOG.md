@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.1.0](https://github.com/iExec-Nox/nox-ingestor-replayer/compare/v0.0.0...v0.1.0) (2026-08-18)
+
+
+### Features
+
+* add bounded publish-with-retry to NATS publisher ([#10](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/10)) ([456f2f8](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/456f2f8eaea160069c4a4bccd0adf2402e4dc7f0))
+* add config validation at startup ([#15](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/15)) ([15884c1](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/15884c15148067c48619cd9a468acecb6b2135aa))
+* add nats and replay metrics ([#16](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/16)) ([519b64c](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/519b64c1138741dc94abb769db406685390eee73))
+* add on-demand replay API endpoints  ([#13](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/13)) ([d499514](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/d499514c7fbaea0c2a034da625047b7d3fea090c))
+* add replay error details ([#8](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/8)) ([1695ec8](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/1695ec8dbf007712fc9ad02df4bfee8d41c92ef6))
+* add replay job runner and status DTO ([#12](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/12)) ([6c76c46](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/6c76c4696c44e8aca62971eb7c5def2cac7cb486))
+* integrate slsa attestation ([#19](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/19)) ([25584bd](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/25584bd0eb8f399d486d9abd156342d7701beeaa))
+* multichain architecture support ([#14](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/14)) ([46e8e32](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/46e8e327ef37f11e85739b96e2517d1909759d9c))
+
+
+### Bug Fixes
+
+* reset version to 0.0.0 for release please ([#4](https://github.com/iExec-Nox/nox-ingestor-replayer/issues/4)) ([2c8f984](https://github.com/iExec-Nox/nox-ingestor-replayer/commit/2c8f98447545701c793e92c71e279bd1230f1e4f))
+
 ## [0.6.0](https://github.com/iExec-Nox/nox-ingestor/compare/v0.5.0...v0.6.0) (2026-06-02)
 
 
